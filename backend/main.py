@@ -117,6 +117,7 @@ class UploadResponse(BaseModel):
     session_id: str
     columns: List[ColumnInfo]
     detected_mappings: Dict[str, str]
+    missing_required_columns: List[str] = []  # Required columns not found in file
     row_count: int
     expires_in_minutes: int
 
@@ -352,6 +353,17 @@ async def workflow_upload(workflow_id: str, file: UploadFile = File(...)):
                 sample_values=sample_values,
             ))
 
+        # Check for missing required columns
+        required_inputs = [
+            inp.get('id', inp.get('name', ''))
+            for inp in workflow.get('inputs', [])
+            if inp.get('required', False)
+        ]
+        missing_required = [
+            col_id for col_id in required_inputs
+            if col_id not in detected
+        ]
+
         # Create session with workflow context
         session_id = str(uuid.uuid4())
         sessions[session_id] = {
@@ -366,6 +378,7 @@ async def workflow_upload(workflow_id: str, file: UploadFile = File(...)):
             session_id=session_id,
             columns=columns_info,
             detected_mappings=detected,
+            missing_required_columns=missing_required,
             row_count=len(df),
             expires_in_minutes=SESSION_TIMEOUT_MINUTES,
         )
