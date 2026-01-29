@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "WebFetch(domain:www.cadastre-manual.admin.ch)",
+      "WebFetch(domain:www.inser.ch)"
+    ]
+  }
+}

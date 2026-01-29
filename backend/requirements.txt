@@ -1,0 +1,16 @@
+# GeoDataCheck Backend Dependencies
+
+# Web framework
+fastapi>=0.104.0
+uvicorn[standard]>=0.24.0
+
+# Data processing
+pandas>=2.0.0
+openpyxl>=3.1.0  # Excel file support
+
+# Pydantic for data validation
+pydantic>=2.0.0
+
+# CORS middleware (included in fastapi)
+# python-multipart for file uploads
+python-multipart>=0.0.6
