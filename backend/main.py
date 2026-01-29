@@ -564,45 +564,45 @@ async def workflow_download_report(workflow_id: str, session_id: str):
         # ─────────────────────────────────────────────────────────────────────
         # Tab 4: Output - Input reference columns + enrichment output columns
         # ─────────────────────────────────────────────────────────────────────
-        # Get column IDs from workflow definition
-        input_col_ids = [col.get('id', col.get('name', '')) for col in workflow.get('inputs', [])]
-        output_col_ids = [col.get('id', col.get('name', '')) for col in workflow.get('outputs', [])]
+        # Get column definitions from workflow
+        input_cols_def = workflow.get('inputs', [])
+        output_cols_def = workflow.get('outputs', [])
 
         # Get detected column mappings for finding actual column names
         detected_columns = session.get('detected_gwr_columns', {})
 
-        # Find the actual bbl_id column name
-        id_col = None
-        if detected_columns.get('bbl_id') and enriched_df is not None:
-            if detected_columns['bbl_id'] in enriched_df.columns:
-                id_col = detected_columns['bbl_id']
-
-        # Fallback to common names if not detected
-        if not id_col:
-            for possible_id in ['bbl_id', 'id', 'ID', 'Id', 'BBL_ID', 'object_id', 'objekt_id']:
-                if enriched_df is not None and possible_id in enriched_df.columns:
-                    id_col = possible_id
-                    break
-
-        # Build output dataframe: input columns (for reference) + output columns
-        output_cols = []
-
         if enriched_df is not None:
+            # Build output dataframe with all defined columns in order
+            output_data = {}
+
             # First add input columns (using detected mappings to find actual names)
-            for logical_id in input_col_ids:
+            for col_def in input_cols_def:
+                logical_id = col_def.get('id', col_def.get('name', ''))
+                col_name = col_def.get('name', logical_id)
+
+                # Try to find the actual column in the data
                 actual_col = detected_columns.get(logical_id)
-                if actual_col and actual_col in enriched_df.columns and actual_col not in output_cols:
-                    output_cols.append(actual_col)
-                elif logical_id in enriched_df.columns and logical_id not in output_cols:
-                    output_cols.append(logical_id)
+                if actual_col and actual_col in enriched_df.columns:
+                    output_data[col_name] = enriched_df[actual_col].values
+                elif logical_id in enriched_df.columns:
+                    output_data[col_name] = enriched_df[logical_id].values
+                else:
+                    # Column not found - add empty column
+                    output_data[col_name] = [None] * len(enriched_df)
 
             # Then add output columns (GWR enrichment results)
-            for col_id in output_col_ids:
-                if col_id in enriched_df.columns and col_id not in output_cols:
-                    output_cols.append(col_id)
+            for col_def in output_cols_def:
+                col_id = col_def.get('id', col_def.get('name', ''))
+                col_name = col_def.get('name', col_id)
 
-            if output_cols:
-                output_df = enriched_df[output_cols].copy()
+                if col_id in enriched_df.columns:
+                    output_data[col_name] = enriched_df[col_id].values
+                else:
+                    # Output column not found - add empty column
+                    output_data[col_name] = [None] * len(enriched_df)
+
+            if output_data:
+                output_df = pd.DataFrame(output_data)
                 output_df.to_excel(writer, sheet_name='Output', index=False)
 
         # ─────────────────────────────────────────────────────────────────────

@@ -83,6 +83,22 @@ class ValidationError:
 
 
 # =============================================================================
+# Helper Functions
+# =============================================================================
+
+def _extract_string(value: Any) -> Optional[str]:
+    """
+    Extract a string from a value that might be a list.
+    GWR API sometimes returns string fields as lists (e.g., strname).
+    """
+    if value is None:
+        return None
+    if isinstance(value, list):
+        return value[0] if value else None
+    return str(value)
+
+
+# =============================================================================
 # GWR API Client
 # =============================================================================
 
@@ -158,7 +174,7 @@ class GWRClient:
                 gdekt=attrs.get("gdekt"),      # Canton code
                 ggdename=attrs.get("ggdename"),  # Municipality
                 dplz4=str(attrs.get("dplz4")) if attrs.get("dplz4") else None,
-                strname=attrs.get("strname"),
+                strname=_extract_string(attrs.get("strname")),  # May be a list
                 deinr=str(attrs.get("deinr")) if attrs.get("deinr") else None,
                 raw_data=attrs
             )
@@ -239,7 +255,7 @@ class GWRClient:
                     gdekt=attrs.get("gdekt"),
                     ggdename=attrs.get("ggdename"),
                     dplz4=str(attrs.get("dplz4")) if attrs.get("dplz4") else None,
-                    strname=attrs.get("strname"),
+                    strname=_extract_string(attrs.get("strname")),  # May be a list
                     deinr=str(attrs.get("deinr")) if attrs.get("deinr") else None,
                     raw_data=attrs
                 )
