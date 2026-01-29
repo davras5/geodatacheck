@@ -1789,8 +1789,52 @@
         }
 
         async function runEnrichment() {
-            // TODO: Implement enrichment workflow
-            alert('Anreicherung wird noch implementiert.');
+            if (!state.sessionId || !state.selectedChecker) {
+                alert('Bitte laden Sie zuerst eine Datei hoch.');
+                return;
+            }
+
+            // Hide results section if visible from previous run
+            document.getElementById('resultsSection').style.display = 'none';
+            document.getElementById('loadingCard').style.display = 'block';
+            document.getElementById('actionBtn').disabled = true;
+
+            const config = {
+                columns: state.detectedMappings || {},
+                options: {},
+            };
+
+            const workflowId = state.selectedChecker.id;
+
+            try {
+                // Run enrichment (uses same endpoint as validation)
+                const response = await fetch(`${API_URL}/api/workflows/${workflowId}/sessions/${state.sessionId}/validate`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(config),
+                });
+
+                if (!response.ok) {
+                    const error = await response.json();
+                    throw new Error(error.detail || 'Enrichment failed');
+                }
+
+                // Store results
+                state.validationResult = await response.json();
+
+                // Show results section with summary
+                showResultsSection(state.validationResult);
+
+                // Re-enable button for another run
+                document.getElementById('actionBtn').disabled = false;
+
+            } catch (error) {
+                console.error('Enrichment error:', error);
+                alert(`Fehler bei der Anreicherung: ${error.message}`);
+                document.getElementById('actionBtn').disabled = false;
+            } finally {
+                document.getElementById('loadingCard').style.display = 'none';
+            }
         }
 
         async function runAnalysis() {

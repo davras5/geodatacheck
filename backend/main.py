@@ -252,7 +252,48 @@ async def workflow_upload(workflow_id: str, file: UploadFile = File(...)):
         if file_ext == '.csv':
             df = pd.read_csv(io.BytesIO(contents))
         else:
-            df = pd.read_excel(io.BytesIO(contents))
+            # For Excel files, auto-detect the best sheet
+            excel_file = pd.ExcelFile(io.BytesIO(contents))
+            sheet_names = excel_file.sheet_names
+
+            if len(sheet_names) == 1:
+                # Only one sheet, use it
+                df = pd.read_excel(excel_file, sheet_name=0)
+            else:
+                # Multiple sheets - find the one with expected columns
+                # Get expected column names from workflow inputs
+                expected_cols = set()
+                for inp in workflow.get('inputs', []):
+                    col_name = inp.get('name', inp.get('id', ''))
+                    if col_name:
+                        expected_cols.add(col_name.lower())
+
+                best_sheet = None
+                best_score = -1
+
+                for sheet_name in sheet_names:
+                    try:
+                        sheet_df = pd.read_excel(excel_file, sheet_name=sheet_name)
+                        if len(sheet_df) == 0:
+                            continue
+
+                        # Count matching columns (case-insensitive)
+                        sheet_cols = set(c.lower() for c in sheet_df.columns)
+                        matches = len(expected_cols & sheet_cols)
+
+                        # Prefer sheets with more matches, or more data if tied
+                        score = matches * 1000 + len(sheet_df)
+                        if score > best_score:
+                            best_score = score
+                            best_sheet = sheet_name
+                    except Exception:
+                        continue
+
+                if best_sheet:
+                    df = pd.read_excel(excel_file, sheet_name=best_sheet)
+                else:
+                    # Fallback to first sheet
+                    df = pd.read_excel(excel_file, sheet_name=0)
 
         if len(df) == 0:
             raise HTTPException(status_code=400, detail="File is empty")
@@ -348,15 +389,20 @@ async def workflow_validate(workflow_id: str, session_id: str, config: Validatio
             if str(workflows_dir) not in sys.path:
                 sys.path.insert(0, str(workflows_dir))
 
-            from workflow import run_gwr_check
+            from workflow import run_gwr_check, auto_detect_columns as gwr_auto_detect
 
-            # Run GWR enrichment with auto-detection
-            enriched_df, gwr_results = run_gwr_check(df, config.columns or None)
+            # Use GWR workflow's own column detection (knows about av_egid, etc.)
+            # Override the generic engine detection with GWR-specific detection
+            gwr_columns = gwr_auto_detect(df)
 
-            # Store enriched dataframe in session
+            # Run GWR enrichment with detected columns
+            enriched_df, gwr_results = run_gwr_check(df, gwr_columns)
+
+            # Store enriched dataframe and detected columns in session
             session['enriched_df'] = enriched_df
             session['result'] = gwr_results
             session['config'] = validation_config
+            session['detected_gwr_columns'] = gwr_columns  # For export to find bbl_id etc.
 
             return gwr_results
 
@@ -480,35 +526,47 @@ async def workflow_download_report(workflow_id: str, session_id: str):
             original_df.to_excel(writer, sheet_name='Input', index=False)
 
         # ─────────────────────────────────────────────────────────────────────
-        # Tab 4: Output - Output columns only (enrichment results)
+        # Tab 4: Output - Input reference columns + enrichment output columns
         # ─────────────────────────────────────────────────────────────────────
+        # Get column IDs from workflow definition
+        input_col_ids = [col.get('id', col.get('name', '')) for col in workflow.get('inputs', [])]
         output_col_ids = [col.get('id', col.get('name', '')) for col in workflow.get('outputs', [])]
 
-        # Include bbl_id for reference + all output columns
+        # Get detected column mappings for finding actual column names
+        detected_columns = session.get('detected_gwr_columns', {})
+
+        # Find the actual bbl_id column name
         id_col = None
-        for possible_id in ['bbl_id', 'id', 'ID', 'Id']:
-            if enriched_df is not None and possible_id in enriched_df.columns:
-                id_col = possible_id
-                break
+        if detected_columns.get('bbl_id') and enriched_df is not None:
+            if detected_columns['bbl_id'] in enriched_df.columns:
+                id_col = detected_columns['bbl_id']
 
-        # Build output dataframe with ID + EGID + output columns
-        score_cols = []
-        if id_col:
-            score_cols.append(id_col)
-
-        # Also include av_egid (the lookup key) for reference
-        if enriched_df is not None:
-            for egid_col in ['av_egid', 'egid', 'EGID']:
-                if egid_col in enriched_df.columns and egid_col not in score_cols:
-                    score_cols.append(egid_col)
+        # Fallback to common names if not detected
+        if not id_col:
+            for possible_id in ['bbl_id', 'id', 'ID', 'Id', 'BBL_ID', 'object_id', 'objekt_id']:
+                if enriched_df is not None and possible_id in enriched_df.columns:
+                    id_col = possible_id
                     break
 
-            for col_id in output_col_ids:
-                if col_id in enriched_df.columns:
-                    score_cols.append(col_id)
+        # Build output dataframe: input columns (for reference) + output columns
+        output_cols = []
 
-            if score_cols:
-                output_df = enriched_df[score_cols].copy()
+        if enriched_df is not None:
+            # First add input columns (using detected mappings to find actual names)
+            for logical_id in input_col_ids:
+                actual_col = detected_columns.get(logical_id)
+                if actual_col and actual_col in enriched_df.columns and actual_col not in output_cols:
+                    output_cols.append(actual_col)
+                elif logical_id in enriched_df.columns and logical_id not in output_cols:
+                    output_cols.append(logical_id)
+
+            # Then add output columns (GWR enrichment results)
+            for col_id in output_col_ids:
+                if col_id in enriched_df.columns and col_id not in output_cols:
+                    output_cols.append(col_id)
+
+            if output_cols:
+                output_df = enriched_df[output_cols].copy()
                 output_df.to_excel(writer, sheet_name='Output', index=False)
 
         # ─────────────────────────────────────────────────────────────────────
@@ -549,16 +607,35 @@ async def workflow_download_report(workflow_id: str, session_id: str):
             warnings_df = pd.DataFrame(warnings_data)
             warnings_df.to_excel(writer, sheet_name='Warnings', index=False)
 
+        # ─────────────────────────────────────────────────────────────────────
+        # Auto-fit column widths for all sheets
+        # ─────────────────────────────────────────────────────────────────────
+        for sheet_name in writer.sheets:
+            worksheet = writer.sheets[sheet_name]
+            for column_cells in worksheet.columns:
+                max_length = 0
+                column_letter = column_cells[0].column_letter
+                for cell in column_cells:
+                    try:
+                        cell_value = str(cell.value) if cell.value is not None else ''
+                        max_length = max(max_length, len(cell_value))
+                    except:
+                        pass
+                # Add padding, cap at reasonable max width
+                adjusted_width = min(max_length + 2, 50)
+                worksheet.column_dimensions[column_letter].width = adjusted_width
+
     output.seek(0)
 
-    filename = session.get('filename', 'data').replace('.xlsx', '').replace('.xls', '')
+    filename = session.get('filename', 'data').replace('.xlsx', '').replace('.xls', '').replace('.csv', '')
     workflow_name = workflow['id'].replace('-', '_')
+    timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
 
     return StreamingResponse(
         output,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={
-            "Content-Disposition": f"attachment; filename={filename}_{workflow_name}_report.xlsx"
+            "Content-Disposition": f"attachment; filename={filename}_{workflow_name}_{timestamp}.xlsx"
         }
     )
 
