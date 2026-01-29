@@ -14,7 +14,7 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, UploadFile, File, HTTPException, Form
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse, JSONResponse
+from fastapi.responses import StreamingResponse, JSONResponse, FileResponse
 from pydantic import BaseModel
 import pandas as pd
 
@@ -126,6 +126,20 @@ class UploadResponse(BaseModel):
 
 @app.get("/")
 async def root():
+    """Serve the frontend HTML."""
+    # In Docker: /app/backend/main.py, index.html is at /app/index.html
+    index_path = Path(__file__).parent.parent / "index.html"
+    if index_path.exists():
+        return FileResponse(index_path, media_type="text/html")
+    # Fallback for local development
+    local_path = Path(__file__).parent.parent / "index.html"
+    if local_path.exists():
+        return FileResponse(local_path, media_type="text/html")
+    return {"error": "index.html not found"}
+
+
+@app.get("/api/health")
+async def health():
     """Health check endpoint."""
     return {"status": "ok", "service": "GeoDataCheck API", "version": "1.0.0"}
 

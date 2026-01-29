@@ -1492,12 +1492,11 @@
 
     <script>
         // API base URL - auto-detects environment
-        // Local: http://localhost:8000
-        // Production: https://app-white-dew-8499.fly.dev
+        // Local dev: http://localhost:8000, Production: same origin (empty string)
         const API_URL = window.location.hostname === 'localhost'
             || window.location.hostname === '127.0.0.1'
             ? 'http://localhost:8000'
-            : 'https://app-white-dew-8499.fly.dev';
+            : '';  // Same origin in production
 
         // State
         let state = {
