@@ -1,21 +1,28 @@
 """
-Address Validation Workflow
-===========================
+EGID/GWR Checker Workflow
+=========================
 
-Validation rules and logic for Swiss address validation.
-Business documentation: see README.md
+Validates and enriches building data against the official Swiss
+Gebäude- und Wohnungsregister (GWR) via geo.admin.ch API.
+
+API Documentation: https://docs.geo.admin.ch/access-data/find-features.html
 """
 
-from typing import List, Dict, Any
+import math
+import time
+import asyncio
+from typing import List, Dict, Any, Optional, Tuple
+from dataclasses import dataclass
+from enum import Enum
 import pandas as pd
+import requests
 from collections import defaultdict
 
-# Import base classes from core
-import sys
-import os
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', 'backend'))
-
-from core.base import BaseRule, ValidationError, Severity
+try:
+    import aiohttp
+    ASYNC_AVAILABLE = True
+except ImportError:
+    ASYNC_AVAILABLE = False
 
 
 # =============================================================================
@@ -28,493 +35,728 @@ SWISS_CANTONS = {
     'TI', 'UR', 'VD', 'VS', 'ZG', 'ZH'
 }
 
-# Switzerland bounds (LV95)
-CH_BOUNDS_LV95 = {
-    'e_min': 2485000, 'e_max': 2834000,
-    'n_min': 1075000, 'n_max': 1296000
+# geo.admin.ch API configuration
+GWR_API_BASE = "https://api3.geo.admin.ch/rest/services/ech/MapServer/find"
+GWR_LAYER = "ch.bfs.gebaeude_wohnungs_register"
+
+# Coordinate tolerance for matching (in meters)
+COORDINATE_TOLERANCE_M = 50
+
+
+# =============================================================================
+# Data Classes
+# =============================================================================
+
+class EvalLabel(str, Enum):
+    MATCH = "Match"
+    PARTIAL = "Partial"
+    MISMATCH = "Mismatch"
+    NOT_FOUND = "Not Found"
+
+
+@dataclass
+class GWRRecord:
+    """Data from the GWR for a single building."""
+    egid: str
+    gkode: Optional[float] = None  # LV95 East
+    gkodn: Optional[float] = None  # LV95 North
+    wgs84_lat: Optional[float] = None
+    wgs84_lon: Optional[float] = None
+    gdekt: Optional[str] = None    # Canton
+    ggdename: Optional[str] = None  # Municipality name
+    dplz4: Optional[str] = None    # PLZ
+    strname: Optional[str] = None  # Street name
+    deinr: Optional[str] = None    # House number
+    raw_data: Optional[Dict] = None
+
+
+@dataclass
+class ValidationError:
+    """A validation error or warning."""
+    row_index: int
+    column: str
+    rule_id: str
+    severity: str  # 'error', 'warning', 'info'
+    message: str
+    value: Any = None
+    suggestion: Optional[str] = None
+
+
+# =============================================================================
+# GWR API Client
+# =============================================================================
+
+class GWRClient:
+    """
+    Client for querying the Swiss Gebäude- und Wohnungsregister (GWR)
+    via the geo.admin.ch API.
+    """
+
+    def __init__(self, timeout: int = 10, rate_limit_delay: float = 0.1):
+        self.timeout = timeout
+        self.rate_limit_delay = rate_limit_delay
+        self._session = requests.Session()
+        self._last_request_time = 0
+
+    def _rate_limit(self):
+        """Ensure we don't exceed API rate limits."""
+        elapsed = time.time() - self._last_request_time
+        if elapsed < self.rate_limit_delay:
+            time.sleep(self.rate_limit_delay - elapsed)
+        self._last_request_time = time.time()
+
+    def lookup_egid(self, egid: str) -> Optional[GWRRecord]:
+        """
+        Look up a building by EGID in the GWR.
+
+        Args:
+            egid: The Eidgenössischer Gebäudeidentifikator
+
+        Returns:
+            GWRRecord if found, None otherwise
+        """
+        self._rate_limit()
+
+        params = {
+            "layer": GWR_LAYER,
+            "searchText": str(egid),
+            "searchField": "egid",
+            "returnGeometry": "false",
+            "contains": "false"  # Exact match
+        }
+
+        try:
+            response = self._session.get(
+                GWR_API_BASE,
+                params=params,
+                timeout=self.timeout
+            )
+            response.raise_for_status()
+            data = response.json()
+
+            if not data.get("results"):
+                return None
+
+            # Take first result (exact match)
+            result = data["results"][0]
+            attrs = result.get("attributes", {})
+
+            # Convert LV95 to WGS84 if coordinates present
+            gkode = attrs.get("gkode")
+            gkodn = attrs.get("gkodn")
+            wgs84_lat, wgs84_lon = None, None
+
+            if gkode and gkodn:
+                wgs84_lat, wgs84_lon = self._lv95_to_wgs84(gkode, gkodn)
+
+            return GWRRecord(
+                egid=str(attrs.get("egid", egid)),
+                gkode=gkode,
+                gkodn=gkodn,
+                wgs84_lat=wgs84_lat,
+                wgs84_lon=wgs84_lon,
+                gdekt=attrs.get("gdekt"),      # Canton code
+                ggdename=attrs.get("ggdename"),  # Municipality
+                dplz4=str(attrs.get("dplz4")) if attrs.get("dplz4") else None,
+                strname=attrs.get("strname"),
+                deinr=str(attrs.get("deinr")) if attrs.get("deinr") else None,
+                raw_data=attrs
+            )
+
+        except requests.RequestException as e:
+            print(f"GWR API error for EGID {egid}: {e}")
+            return None
+        except (KeyError, ValueError, TypeError) as e:
+            print(f"GWR parse error for EGID {egid}: {e}")
+            return None
+
+    def lookup_batch(self, egids: List[str], progress_callback=None) -> Dict[str, Optional[GWRRecord]]:
+        """
+        Look up multiple EGIDs (synchronous version).
+
+        Args:
+            egids: List of EGID strings
+            progress_callback: Optional callback(current, total)
+
+        Returns:
+            Dict mapping EGID to GWRRecord (or None if not found)
+        """
+        results = {}
+        total = len(egids)
+
+        for i, egid in enumerate(egids):
+            if egid and str(egid).strip():
+                results[str(egid)] = self.lookup_egid(str(egid).strip())
+            else:
+                results[str(egid)] = None
+
+            if progress_callback:
+                progress_callback(i + 1, total)
+
+        return results
+
+    async def async_lookup_egid(self, session: 'aiohttp.ClientSession', egid: str) -> Tuple[str, Optional[GWRRecord]]:
+        """
+        Async lookup of a single EGID.
+
+        Returns:
+            Tuple of (egid, GWRRecord or None)
+        """
+        params = {
+            "layer": GWR_LAYER,
+            "searchText": str(egid),
+            "searchField": "egid",
+            "returnGeometry": "false",
+            "contains": "false"
+        }
+
+        try:
+            async with session.get(GWR_API_BASE, params=params, timeout=aiohttp.ClientTimeout(total=self.timeout)) as response:
+                if response.status != 200:
+                    return (egid, None)
+
+                data = await response.json()
+
+                if not data.get("results"):
+                    return (egid, None)
+
+                result = data["results"][0]
+                attrs = result.get("attributes", {})
+
+                gkode = attrs.get("gkode")
+                gkodn = attrs.get("gkodn")
+                wgs84_lat, wgs84_lon = None, None
+
+                if gkode and gkodn:
+                    wgs84_lat, wgs84_lon = self._lv95_to_wgs84(gkode, gkodn)
+
+                record = GWRRecord(
+                    egid=str(attrs.get("egid", egid)),
+                    gkode=gkode,
+                    gkodn=gkodn,
+                    wgs84_lat=wgs84_lat,
+                    wgs84_lon=wgs84_lon,
+                    gdekt=attrs.get("gdekt"),
+                    ggdename=attrs.get("ggdename"),
+                    dplz4=str(attrs.get("dplz4")) if attrs.get("dplz4") else None,
+                    strname=attrs.get("strname"),
+                    deinr=str(attrs.get("deinr")) if attrs.get("deinr") else None,
+                    raw_data=attrs
+                )
+                return (egid, record)
+
+        except Exception as e:
+            print(f"Async GWR API error for EGID {egid}: {e}")
+            return (egid, None)
+
+    async def async_lookup_batch(self, egids: List[str], max_concurrent: int = 20,
+                                  progress_callback=None) -> Dict[str, Optional[GWRRecord]]:
+        """
+        Look up multiple EGIDs concurrently (async version).
+
+        Args:
+            egids: List of EGID strings
+            max_concurrent: Maximum concurrent requests (default 20)
+            progress_callback: Optional callback(current, total, message)
+
+        Returns:
+            Dict mapping EGID to GWRRecord (or None if not found)
+        """
+        if not ASYNC_AVAILABLE:
+            # Fallback to sync version
+            return self.lookup_batch(egids, progress_callback)
+
+        results = {}
+        total = len(egids)
+        completed = 0
+
+        # Semaphore to limit concurrent requests
+        semaphore = asyncio.Semaphore(max_concurrent)
+
+        async def lookup_with_semaphore(session, egid):
+            nonlocal completed
+            async with semaphore:
+                result = await self.async_lookup_egid(session, egid)
+                completed += 1
+                if progress_callback:
+                    progress_callback(completed, total, f"GWR-Abfrage: {completed}/{total}")
+                return result
+
+        connector = aiohttp.TCPConnector(limit=max_concurrent, limit_per_host=max_concurrent)
+        async with aiohttp.ClientSession(connector=connector) as session:
+            tasks = [
+                lookup_with_semaphore(session, egid)
+                for egid in egids
+                if egid and str(egid).strip()
+            ]
+
+            batch_results = await asyncio.gather(*tasks, return_exceptions=True)
+
+            for item in batch_results:
+                if isinstance(item, Exception):
+                    continue
+                if isinstance(item, tuple) and len(item) == 2:
+                    egid, record = item
+                    results[egid] = record
+
+        return results
+
+    @staticmethod
+    def _lv95_to_wgs84(e: float, n: float) -> Tuple[float, float]:
+        """
+        Convert LV95 coordinates to WGS84.
+
+        Based on the approximate formulas from swisstopo.
+        """
+        # Shift to Bern origin
+        y = (e - 2600000) / 1000000
+        x = (n - 1200000) / 1000000
+
+        # Calculate longitude
+        lon = 2.6779094 \
+            + 4.728982 * y \
+            + 0.791484 * y * x \
+            + 0.1306 * y * x * x \
+            - 0.0436 * y * y * y
+
+        # Calculate latitude
+        lat = 16.9023892 \
+            + 3.238272 * x \
+            - 0.270978 * y * y \
+            - 0.002528 * x * x \
+            - 0.0447 * y * y * x \
+            - 0.0140 * x * x * x
+
+        # Convert to degrees
+        lon = lon * 100 / 36
+        lat = lat * 100 / 36
+
+        return round(lat, 6), round(lon, 6)
+
+
+# =============================================================================
+# Column Auto-Detection
+# =============================================================================
+
+# Mapping of logical column names to possible variations (case-insensitive)
+COLUMN_PATTERNS = {
+    'bbl_id': ['bbl_id', 'bblid', 'bbl-id', 'id', 'objekt_id', 'objektid'],
+    'av_egid': ['av_egid', 'egid', 'gwr_egid', 'gebaeude_id', 'building_id'],
+    'wgs84_lat': ['wgs84_lat', 'lat', 'latitude', 'breitengrad', 'y', 'coord_y'],
+    'wgs84_lon': ['wgs84_lon', 'lon', 'lng', 'longitude', 'laengengrad', 'x', 'coord_x'],
+    'adr_reg': ['adr_reg', 'kanton', 'canton', 'region', 'kt', 'state'],
+    'adr_ort': ['adr_ort', 'ort', 'city', 'stadt', 'gemeinde', 'municipality', 'ortschaft'],
+    'adr_plz': ['adr_plz', 'plz', 'zip', 'postleitzahl', 'postal_code', 'npa'],
+    'adr_str': ['adr_str', 'strasse', 'street', 'str', 'strassenname', 'rue'],
+    'adr_hsnr': ['adr_hsnr', 'hausnummer', 'hsnr', 'hnr', 'house_number', 'nr', 'numero'],
 }
 
-# Switzerland bounds (WGS84)
-CH_BOUNDS_WGS84 = {
-    'lon_min': 5.9, 'lon_max': 10.5,
-    'lat_min': 45.8, 'lat_max': 47.9
-}
+
+def auto_detect_columns(df: pd.DataFrame) -> Dict[str, str]:
+    """
+    Auto-detect column mappings based on column names.
+
+    Args:
+        df: Input DataFrame
+
+    Returns:
+        Dict mapping logical names to actual column names found in df
+    """
+    detected = {}
+    df_columns_lower = {col.lower(): col for col in df.columns}
+
+    for logical_name, patterns in COLUMN_PATTERNS.items():
+        for pattern in patterns:
+            if pattern.lower() in df_columns_lower:
+                detected[logical_name] = df_columns_lower[pattern.lower()]
+                break
+
+    return detected
 
 
 # =============================================================================
-# RULES: Vollständigkeit (Completeness)
+# GWR Enricher
 # =============================================================================
 
-class RequiredFieldsRule(BaseRule):
+class GWREnricher:
     """
-    R-ADDR-001: Pflichtfelder
-    Prüft ob PLZ und Ort ausgefüllt sind.
-    """
-    rule_id = "R-ADDR-001"
+    Enriches a DataFrame with GWR data and performs validation.
 
-    def validate(self, df: pd.DataFrame, config: Dict[str, Any]) -> List[ValidationError]:
+    The enricher will:
+    - Auto-detect columns if no mapping is provided
+    - Keep ALL original columns in the output
+    - Add GWR output columns
+    - Only require the EGID column to be present
+    """
+
+    def __init__(self, client: Optional[GWRClient] = None):
+        self.client = client or GWRClient()
+
+    def enrich(self, df: pd.DataFrame, column_mapping: Optional[Dict[str, str]] = None,
+               progress_callback=None) -> Tuple[pd.DataFrame, List[ValidationError]]:
+        """
+        Enrich DataFrame with GWR data and validate.
+
+        Args:
+            df: Input DataFrame (can contain extra columns - only mapped ones are processed)
+            column_mapping: Maps logical names to actual column names. If None or empty,
+                columns will be auto-detected based on naming patterns.
+                - 'bbl_id': BBL ID column
+                - 'av_egid': EGID column (required)
+                - 'wgs84_lat': Latitude column (optional)
+                - 'wgs84_lon': Longitude column (optional)
+                - 'adr_reg': Region/Canton column (optional)
+                - 'adr_ort': City column (optional)
+                - 'adr_plz': PLZ column (optional)
+                - 'adr_str': Street column (optional)
+                - 'adr_hsnr': House number column (optional)
+            progress_callback: Optional callback(current, total, message)
+
+        Returns:
+            Tuple of (enriched DataFrame, list of validation errors)
+        """
         errors = []
+        result_df = df.copy()
 
-        required = [('plz', 'PLZ'), ('ort', 'Ort')]
+        # Auto-detect columns if mapping not provided or empty
+        if not column_mapping:
+            column_mapping = auto_detect_columns(df)
+            if progress_callback:
+                detected_cols = ', '.join(f"{k}={v}" for k, v in column_mapping.items())
+                progress_callback(0, 0, f"Auto-detected: {detected_cols}")
 
-        for field, label in required:
-            col = self.get_column(df, config, field)
-            if col is None:
-                continue
+        # Get column names
+        egid_col = column_mapping.get('av_egid')
+        if not egid_col or egid_col not in df.columns:
+            raise ValueError("EGID column not found in DataFrame")
 
-            for idx, row in df.iterrows():
-                val = row[col]
-                if pd.isna(val) or str(val).strip() == '':
-                    errors.append(ValidationError(
-                        row_index=idx,
-                        column=col,
-                        rule_id=self.rule_id,
-                        severity=Severity.ERROR,
-                        message=f"{label} fehlt oder ist leer",
-                        value=None
-                    ))
+        # Add output columns
+        output_cols = [
+            'gwr_wgs84_lat', 'gwr_wgs84_lon', 'gwr_gkode', 'gwr_gkodn',
+            'gwr_adr_reg', 'gwr_adr_ort', 'gwr_adr_plz', 'gwr_adr_str',
+            'gwr_adr_hsnr', 'eval_score', 'eval_label'
+        ]
+        for col in output_cols:
+            result_df[col] = None
 
-        return errors
-
-
-class CoordinatePresenceRule(BaseRule):
-    """
-    R-ADDR-005: Koordinaten vorhanden
-    Prüft ob E- und N-Koordinaten beide vorhanden sind.
-    """
-    rule_id = "R-ADDR-005"
-
-    def validate(self, df: pd.DataFrame, config: Dict[str, Any]) -> List[ValidationError]:
-        errors = []
-
-        e_col = self.get_column(df, config, 'easting')
-        n_col = self.get_column(df, config, 'northing')
-
-        if e_col is None or n_col is None:
-            return errors
-
-        for idx, row in df.iterrows():
-            e_val = row[e_col]
-            n_val = row[n_col]
-
-            e_empty = pd.isna(e_val) or str(e_val).strip() == ''
-            n_empty = pd.isna(n_val) or str(n_val).strip() == ''
-
-            if e_empty and not n_empty:
-                errors.append(ValidationError(
-                    row_index=idx, column=e_col, rule_id=self.rule_id,
-                    severity=Severity.WARNING,
-                    message="E-Koordinate fehlt (N vorhanden)"
-                ))
-            elif n_empty and not e_empty:
-                errors.append(ValidationError(
-                    row_index=idx, column=n_col, rule_id=self.rule_id,
-                    severity=Severity.WARNING,
-                    message="N-Koordinate fehlt (E vorhanden)"
-                ))
-
-        return errors
-
-
-class EGIDPresenceRule(BaseRule):
-    """
-    R-ADDR-008: EGID vorhanden
-    Jeder Datensatz sollte eine EGID haben.
-    """
-    rule_id = "R-ADDR-008"
-
-    def validate(self, df: pd.DataFrame, config: Dict[str, Any]) -> List[ValidationError]:
-        errors = []
-
-        egid_col = self.get_column(df, config, 'egid')
-        if egid_col is None:
-            return errors
-
-        for idx, row in df.iterrows():
-            val = row[egid_col]
-            if pd.isna(val) or str(val).strip() == '':
-                errors.append(ValidationError(
-                    row_index=idx, column=egid_col, rule_id=self.rule_id,
-                    severity=Severity.ERROR,
-                    message="EGID fehlt"
-                ))
-
-        return errors
-
-
-# =============================================================================
-# RULES: Format
-# =============================================================================
-
-class PLZFormatRule(BaseRule):
-    """
-    R-ADDR-002: PLZ-Format
-    Schweizer PLZ muss 4-stellig sein (1000-9999).
-    """
-    rule_id = "R-ADDR-002"
-
-    def validate(self, df: pd.DataFrame, config: Dict[str, Any]) -> List[ValidationError]:
-        errors = []
-
-        plz_col = self.get_column(df, config, 'plz')
-        if plz_col is None:
-            return errors
-
-        for idx, row in df.iterrows():
-            val = row[plz_col]
-
-            if pd.isna(val) or str(val).strip() == '':
-                continue
-
-            plz_str = str(val).strip()
-
-            # Handle floats like 8001.0
-            if '.' in plz_str:
+        # Collect unique EGIDs (cleaned: handle float values like 123456.0)
+        def clean_egid(val):
+            s = str(val).strip()
+            if '.' in s:
                 try:
-                    plz_str = str(int(float(plz_str)))
+                    return str(int(float(s)))
+                except ValueError:
+                    pass
+            return s
+
+        egids = list(set(clean_egid(e) for e in df[egid_col].dropna().astype(str).unique()))
+
+        if progress_callback:
+            progress_callback(0, len(egids), "GWR-Abfrage wird gestartet...")
+
+        # Batch lookup - use async if available for better performance
+        if ASYNC_AVAILABLE and len(egids) > 5:
+            # Use async for larger batches (significant speedup)
+            try:
+                loop = asyncio.get_event_loop()
+                if loop.is_running():
+                    # If already in async context, create a new task
+                    import concurrent.futures
+                    with concurrent.futures.ThreadPoolExecutor() as executor:
+                        future = executor.submit(
+                            asyncio.run,
+                            self.client.async_lookup_batch(egids, max_concurrent=20, progress_callback=progress_callback)
+                        )
+                        gwr_cache = future.result()
+                else:
+                    gwr_cache = loop.run_until_complete(
+                        self.client.async_lookup_batch(egids, max_concurrent=20, progress_callback=progress_callback)
+                    )
+            except RuntimeError:
+                # No event loop, create new one
+                gwr_cache = asyncio.run(
+                    self.client.async_lookup_batch(egids, max_concurrent=20, progress_callback=progress_callback)
+                )
+        else:
+            # Use sync for small batches or when async not available
+            gwr_cache = self.client.lookup_batch(
+                egids,
+                lambda i, t: progress_callback(i, t, f"GWR-Abfrage: {i}/{t}") if progress_callback else None
+            )
+
+        # Process each row
+        for idx, row in df.iterrows():
+            egid_val = row[egid_col]
+
+            # R-GWR-01: EGID required
+            if pd.isna(egid_val) or str(egid_val).strip() == '' or str(egid_val).strip() == '0':
+                errors.append(ValidationError(
+                    row_index=idx,
+                    column=egid_col,
+                    rule_id="R-GWR-01",
+                    severity="error",
+                    message="EGID fehlt oder ist 0/NULL",
+                    value=egid_val
+                ))
+                result_df.at[idx, 'eval_label'] = EvalLabel.NOT_FOUND.value
+                result_df.at[idx, 'eval_score'] = 0
+                continue
+
+            egid_str = str(egid_val).strip()
+
+            # Handle float EGIDs (e.g., 123456.0)
+            if '.' in egid_str:
+                try:
+                    egid_str = str(int(float(egid_str)))
                 except ValueError:
                     pass
 
-            if not plz_str.isdigit():
+            # Look up GWR data
+            gwr = gwr_cache.get(egid_str)
+
+            if gwr is None:
+                # R-GWR-07: EGID not found in GWR
                 errors.append(ValidationError(
-                    row_index=idx, column=plz_col, rule_id=self.rule_id,
-                    severity=Severity.ERROR,
-                    message=f"PLZ nicht numerisch: '{val}'",
-                    value=val
+                    row_index=idx,
+                    column=egid_col,
+                    rule_id="R-GWR-07",
+                    severity="error",
+                    message=f"EGID {egid_str} nicht im GWR gefunden",
+                    value=egid_str
                 ))
-            elif len(plz_str) != 4:
-                errors.append(ValidationError(
-                    row_index=idx, column=plz_col, rule_id=self.rule_id,
-                    severity=Severity.ERROR,
-                    message=f"PLZ nicht 4-stellig: '{val}'",
-                    value=val
-                ))
-            elif not (1000 <= int(plz_str) <= 9999):
-                errors.append(ValidationError(
-                    row_index=idx, column=plz_col, rule_id=self.rule_id,
-                    severity=Severity.ERROR,
-                    message=f"PLZ ausserhalb 1000-9999: '{val}'",
-                    value=val
-                ))
-
-        return errors
-
-
-class CantonValidationRule(BaseRule):
-    """
-    R-ADDR-003: Kanton gültig
-    Kantonsabkürzung muss gültig sein.
-    """
-    rule_id = "R-ADDR-003"
-
-    def validate(self, df: pd.DataFrame, config: Dict[str, Any]) -> List[ValidationError]:
-        errors = []
-
-        kanton_col = self.get_column(df, config, 'kanton')
-        if kanton_col is None:
-            return errors
-
-        for idx, row in df.iterrows():
-            val = row[kanton_col]
-
-            if pd.isna(val) or str(val).strip() == '':
+                result_df.at[idx, 'eval_label'] = EvalLabel.NOT_FOUND.value
+                result_df.at[idx, 'eval_score'] = 0
                 continue
 
-            kanton = str(val).strip().upper()
+            # Populate GWR output columns
+            result_df.at[idx, 'gwr_wgs84_lat'] = gwr.wgs84_lat
+            result_df.at[idx, 'gwr_wgs84_lon'] = gwr.wgs84_lon
+            result_df.at[idx, 'gwr_gkode'] = gwr.gkode
+            result_df.at[idx, 'gwr_gkodn'] = gwr.gkodn
+            result_df.at[idx, 'gwr_adr_reg'] = gwr.gdekt
+            result_df.at[idx, 'gwr_adr_ort'] = gwr.ggdename
+            result_df.at[idx, 'gwr_adr_plz'] = gwr.dplz4
+            result_df.at[idx, 'gwr_adr_str'] = gwr.strname
+            result_df.at[idx, 'gwr_adr_hsnr'] = gwr.deinr
 
-            if kanton not in SWISS_CANTONS:
-                errors.append(ValidationError(
-                    row_index=idx, column=kanton_col, rule_id=self.rule_id,
-                    severity=Severity.ERROR,
-                    message=f"Ungültiger Kanton: '{val}'",
-                    value=val
-                ))
+            # Calculate match score
+            score, field_errors = self._calculate_match_score(
+                row, gwr, column_mapping, idx
+            )
+            errors.extend(field_errors)
 
-        return errors
+            result_df.at[idx, 'eval_score'] = score
 
-
-class StreetFormatRule(BaseRule):
-    """
-    R-ADDR-004: Strassenformat
-    Prüft Strassennamen auf offensichtliche Fehler.
-    """
-    rule_id = "R-ADDR-004"
-
-    def validate(self, df: pd.DataFrame, config: Dict[str, Any]) -> List[ValidationError]:
-        errors = []
-
-        strasse_col = self.get_column(df, config, 'strasse')
-        if strasse_col is None:
-            return errors
-
-        for idx, row in df.iterrows():
-            val = row[strasse_col]
-
-            if pd.isna(val) or str(val).strip() == '':
-                continue
-
-            strasse = str(val).strip()
-
-            if strasse.isdigit():
-                errors.append(ValidationError(
-                    row_index=idx, column=strasse_col, rule_id=self.rule_id,
-                    severity=Severity.WARNING,
-                    message=f"Strasse nur numerisch: '{val}'",
-                    value=val
-                ))
-            elif len(strasse) < 3:
-                errors.append(ValidationError(
-                    row_index=idx, column=strasse_col, rule_id=self.rule_id,
-                    severity=Severity.WARNING,
-                    message=f"Strasse sehr kurz: '{val}'",
-                    value=val
-                ))
-
-        return errors
-
-
-class EGIDFormatRule(BaseRule):
-    """
-    R-ADDR-007: EGID-Format
-    EGID muss eine positive Ganzzahl sein.
-    """
-    rule_id = "R-ADDR-007"
-
-    def validate(self, df: pd.DataFrame, config: Dict[str, Any]) -> List[ValidationError]:
-        errors = []
-
-        egid_col = self.get_column(df, config, 'egid')
-        if egid_col is None:
-            return errors
-
-        for idx, row in df.iterrows():
-            val = row[egid_col]
-
-            if pd.isna(val) or str(val).strip() == '':
-                continue
-
-            try:
-                egid_str = str(val).strip()
-                if '.' in egid_str:
-                    egid = int(float(egid_str))
-                else:
-                    egid = int(egid_str)
-
-                if egid <= 0:
-                    errors.append(ValidationError(
-                        row_index=idx, column=egid_col, rule_id=self.rule_id,
-                        severity=Severity.ERROR,
-                        message=f"EGID muss positiv sein: '{val}'",
-                        value=val
-                    ))
-            except (ValueError, TypeError):
-                errors.append(ValidationError(
-                    row_index=idx, column=egid_col, rule_id=self.rule_id,
-                    severity=Severity.ERROR,
-                    message=f"EGID ungültiges Format: '{val}'",
-                    value=val
-                ))
-
-        return errors
-
-
-# =============================================================================
-# RULES: Konsistenz (Consistency)
-# =============================================================================
-
-class SwissBoundsRule(BaseRule):
-    """
-    R-ADDR-006: Koordinaten in Schweiz
-    Koordinaten müssen innerhalb der Schweizer Grenzen liegen.
-    """
-    rule_id = "R-ADDR-006"
-
-    def validate(self, df: pd.DataFrame, config: Dict[str, Any]) -> List[ValidationError]:
-        errors = []
-
-        e_col = self.get_column(df, config, 'easting')
-        n_col = self.get_column(df, config, 'northing')
-
-        if e_col is None or n_col is None:
-            return errors
-
-        for idx, row in df.iterrows():
-            e_val = row[e_col]
-            n_val = row[n_col]
-
-            if pd.isna(e_val) or pd.isna(n_val):
-                continue
-
-            try:
-                e = float(e_val)
-                n = float(n_val)
-            except (ValueError, TypeError):
-                errors.append(ValidationError(
-                    row_index=idx, column=f"{e_col}/{n_col}", rule_id=self.rule_id,
-                    severity=Severity.ERROR,
-                    message=f"Ungültige Koordinaten: E={e_val}, N={n_val}",
-                    value=f"{e_val}, {n_val}"
-                ))
-                continue
-
-            # Detect coordinate system
-            if 2000000 < e < 3000000 and 1000000 < n < 2000000:
-                # LV95
-                bounds = CH_BOUNDS_LV95
-                if not (bounds['e_min'] <= e <= bounds['e_max']):
-                    errors.append(ValidationError(
-                        row_index=idx, column=e_col, rule_id=self.rule_id,
-                        severity=Severity.ERROR,
-                        message=f"E-Koordinate ausserhalb CH: {e}",
-                        value=e
-                    ))
-                if not (bounds['n_min'] <= n <= bounds['n_max']):
-                    errors.append(ValidationError(
-                        row_index=idx, column=n_col, rule_id=self.rule_id,
-                        severity=Severity.ERROR,
-                        message=f"N-Koordinate ausserhalb CH: {n}",
-                        value=n
-                    ))
-            elif 5 < e < 11 and 45 < n < 48:
-                # WGS84
-                bounds = CH_BOUNDS_WGS84
-                if not (bounds['lon_min'] <= e <= bounds['lon_max']):
-                    errors.append(ValidationError(
-                        row_index=idx, column=e_col, rule_id=self.rule_id,
-                        severity=Severity.ERROR,
-                        message=f"Longitude ausserhalb CH: {e}",
-                        value=e
-                    ))
-                if not (bounds['lat_min'] <= n <= bounds['lat_max']):
-                    errors.append(ValidationError(
-                        row_index=idx, column=n_col, rule_id=self.rule_id,
-                        severity=Severity.ERROR,
-                        message=f"Latitude ausserhalb CH: {n}",
-                        value=n
-                    ))
+            # Determine label
+            if score >= 90:
+                result_df.at[idx, 'eval_label'] = EvalLabel.MATCH.value
+            elif score >= 50:
+                result_df.at[idx, 'eval_label'] = EvalLabel.PARTIAL.value
             else:
+                result_df.at[idx, 'eval_label'] = EvalLabel.MISMATCH.value
+
+        # R-GWR-02: Check EGID uniqueness
+        egid_counts = df[egid_col].dropna().astype(str).value_counts()
+        duplicates = egid_counts[egid_counts > 1]
+
+        for egid, count in duplicates.items():
+            dup_indices = df[df[egid_col].astype(str) == str(egid)].index.tolist()
+            for idx in dup_indices[1:]:  # Skip first occurrence
                 errors.append(ValidationError(
-                    row_index=idx, column=f"{e_col}/{n_col}", rule_id=self.rule_id,
-                    severity=Severity.ERROR,
-                    message=f"Koordinatensystem nicht erkannt: E={e}, N={n}",
-                    value=f"{e}, {n}"
+                    row_index=idx,
+                    column=egid_col,
+                    rule_id="R-GWR-02",
+                    severity="warning",
+                    message=f"EGID {egid} mehrfach vorhanden ({count}x)",
+                    value=egid
                 ))
 
-        return errors
+        return result_df, errors
 
+    def _calculate_match_score(self, row: pd.Series, gwr: GWRRecord,
+                                column_mapping: Dict[str, str],
+                                row_idx: int) -> Tuple[int, List[ValidationError]]:
+        """
+        Calculate match score between row data and GWR data.
 
-# =============================================================================
-# RULES: Duplikate
-# =============================================================================
-
-class DuplicateAddressRule(BaseRule):
-    """
-    R-ADDR-009: Doppelte Adressen
-    Erkennt doppelte Adressen basierend auf PLZ+Ort+Strasse.
-    """
-    rule_id = "R-ADDR-009"
-
-    def validate(self, df: pd.DataFrame, config: Dict[str, Any]) -> List[ValidationError]:
+        Returns score (0-100) and list of field-level errors.
+        """
         errors = []
+        matches = 0
+        total_checks = 0
 
-        plz_col = self.get_column(df, config, 'plz')
-        ort_col = self.get_column(df, config, 'ort')
-        strasse_col = self.get_column(df, config, 'strasse')
+        # Check coordinates
+        lat_col = column_mapping.get('wgs84_lat')
+        lon_col = column_mapping.get('wgs84_lon')
 
-        if plz_col is None or ort_col is None:
-            return errors
+        if lat_col and lon_col and lat_col in row.index and lon_col in row.index:
+            row_lat = row.get(lat_col)
+            row_lon = row.get(lon_col)
 
-        # Build address key -> rows mapping
-        address_rows = defaultdict(list)
+            if pd.notna(row_lat) and pd.notna(row_lon) and gwr.wgs84_lat and gwr.wgs84_lon:
+                total_checks += 1
+                try:
+                    distance = self._haversine_distance(
+                        float(row_lat), float(row_lon),
+                        gwr.wgs84_lat, gwr.wgs84_lon
+                    )
+                    if distance <= COORDINATE_TOLERANCE_M:
+                        matches += 1
+                    else:
+                        errors.append(ValidationError(
+                            row_index=row_idx,
+                            column=f"{lat_col}/{lon_col}",
+                            rule_id="R-GWR-06",
+                            severity="warning",
+                            message=f"Koordinaten weichen um {distance:.0f}m vom GWR ab",
+                            value=f"{row_lat}, {row_lon}",
+                            suggestion=f"{gwr.wgs84_lat}, {gwr.wgs84_lon}"
+                        ))
+                except (ValueError, TypeError):
+                    pass
 
-        for idx, row in df.iterrows():
-            plz = str(row[plz_col]).strip() if pd.notna(row[plz_col]) else ''
-            ort = str(row[ort_col]).strip().lower() if pd.notna(row[ort_col]) else ''
-            strasse = str(row[strasse_col]).strip().lower() if strasse_col and pd.notna(row.get(strasse_col)) else ''
+        # Check address fields
+        field_checks = [
+            ('adr_reg', gwr.gdekt, "Kanton"),
+            ('adr_plz', gwr.dplz4, "PLZ"),
+            ('adr_ort', gwr.ggdename, "Ort"),
+            ('adr_str', gwr.strname, "Strasse"),
+            ('adr_hsnr', gwr.deinr, "Hausnummer"),
+        ]
 
-            if plz and ort:
-                key = f"{plz}|{ort}|{strasse}"
-                address_rows[key].append(idx)
+        mismatched_fields = []
 
-        # Report duplicates
-        for key, rows in address_rows.items():
-            if len(rows) > 1:
-                for idx in rows[1:]:
-                    errors.append(ValidationError(
-                        row_index=idx, column="Adresse", rule_id=self.rule_id,
-                        severity=Severity.WARNING,
-                        message=f"Mögliches Duplikat (Zeilen: {', '.join(str(r+2) for r in rows)})",
-                        value=key.replace('|', ', ')
-                    ))
-
-        return errors
-
-
-class DuplicateEGIDRule(BaseRule):
-    """
-    R-ADDR-010: Doppelte EGIDs
-    Jede EGID sollte nur einmal vorkommen.
-    """
-    rule_id = "R-ADDR-010"
-
-    def validate(self, df: pd.DataFrame, config: Dict[str, Any]) -> List[ValidationError]:
-        errors = []
-
-        egid_col = self.get_column(df, config, 'egid')
-        if egid_col is None:
-            return errors
-
-        egid_rows = defaultdict(list)
-
-        for idx, row in df.iterrows():
-            val = row[egid_col]
-            if pd.isna(val) or str(val).strip() == '':
+        for field_key, gwr_value, field_label in field_checks:
+            col = column_mapping.get(field_key)
+            if not col or col not in row.index:
                 continue
 
-            # Normalize
-            try:
-                egid_str = str(val).strip()
-                if '.' in egid_str:
-                    egid_key = str(int(float(egid_str)))
+            row_value = row.get(col)
+
+            if pd.notna(row_value) and gwr_value:
+                total_checks += 1
+                if self._normalize_string(str(row_value)) == self._normalize_string(str(gwr_value)):
+                    matches += 1
                 else:
-                    egid_key = egid_str
-                egid_rows[egid_key].append(idx)
-            except (ValueError, TypeError):
-                continue
+                    mismatched_fields.append(f"{field_label}: '{row_value}' → '{gwr_value}'")
 
-        for egid, rows in egid_rows.items():
-            if len(rows) > 1:
-                for idx in rows[1:]:
-                    errors.append(ValidationError(
-                        row_index=idx, column=egid_col, rule_id=self.rule_id,
-                        severity=Severity.WARNING,
-                        message=f"EGID mehrfach vorhanden (Zeilen: {', '.join(str(r+2) for r in rows)})",
-                        value=egid
-                    ))
+        # Report address mismatches as single error
+        if mismatched_fields:
+            errors.append(ValidationError(
+                row_index=row_idx,
+                column="Adresse",
+                rule_id="R-GWR-05",
+                severity="warning",
+                message=f"Adresse weicht vom GWR ab: {'; '.join(mismatched_fields)}",
+                value=None
+            ))
 
-        return errors
+        # Calculate percentage
+        if total_checks == 0:
+            return 100, errors  # No data to compare = assume match
+
+        score = int((matches / total_checks) * 100)
+        return score, errors
+
+    @staticmethod
+    def _normalize_string(s: str) -> str:
+        """Normalize string for comparison."""
+        return s.strip().lower().replace('.', '').replace(',', '')
+
+    @staticmethod
+    def _haversine_distance(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+        """
+        Calculate distance between two WGS84 coordinates in meters.
+        """
+        R = 6371000  # Earth radius in meters
+
+        phi1 = math.radians(lat1)
+        phi2 = math.radians(lat2)
+        delta_phi = math.radians(lat2 - lat1)
+        delta_lambda = math.radians(lon2 - lon1)
+
+        a = math.sin(delta_phi / 2) ** 2 + \
+            math.cos(phi1) * math.cos(phi2) * math.sin(delta_lambda / 2) ** 2
+        c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+
+        return R * c
 
 
 # =============================================================================
-# Export all rules
+# Main Workflow Function
 # =============================================================================
 
-ALL_RULES = [
-    # Vollständigkeit
-    RequiredFieldsRule,
-    CoordinatePresenceRule,
-    EGIDPresenceRule,
-    # Format
-    PLZFormatRule,
-    CantonValidationRule,
-    StreetFormatRule,
-    EGIDFormatRule,
-    # Konsistenz
-    SwissBoundsRule,
-    # Duplikate
-    DuplicateAddressRule,
-    DuplicateEGIDRule,
-]
+def run_gwr_check(df: pd.DataFrame, column_mapping: Optional[Dict[str, str]] = None,
+                  progress_callback=None) -> Tuple[pd.DataFrame, Dict[str, Any]]:
+    """
+    Run the GWR check workflow.
 
-# Rule class lookup by ID
-RULE_CLASSES = {rule.rule_id: rule for rule in ALL_RULES}
+    Args:
+        df: Input DataFrame with building data (can contain extra columns)
+        column_mapping: Maps logical names to actual column names.
+            If None or empty, columns will be auto-detected.
+        progress_callback: Optional progress callback
+
+    Returns:
+        Tuple of (enriched DataFrame, results dict)
+    """
+    enricher = GWREnricher()
+    enriched_df, errors = enricher.enrich(df, column_mapping, progress_callback)
+
+    # Build results summary
+    total_rows = len(df)
+    error_count = len([e for e in errors if e.severity == 'error'])
+    warning_count = len([e for e in errors if e.severity == 'warning'])
+    info_count = len([e for e in errors if e.severity == 'info'])
+
+    # Count by eval_label
+    label_counts = enriched_df['eval_label'].value_counts().to_dict()
+
+    results = {
+        'total_rows': total_rows,
+        'error_count': error_count,
+        'warning_count': warning_count,
+        'info_count': info_count,
+        'passed_rows': total_rows - len(set(e.row_index for e in errors if e.severity == 'error')),
+        'match_count': label_counts.get(EvalLabel.MATCH.value, 0),
+        'partial_count': label_counts.get(EvalLabel.PARTIAL.value, 0),
+        'mismatch_count': label_counts.get(EvalLabel.MISMATCH.value, 0),
+        'not_found_count': label_counts.get(EvalLabel.NOT_FOUND.value, 0),
+        'errors': [
+            {
+                'row_number': e.row_index + 2,  # Excel row (1-indexed + header)
+                'column': e.column,
+                'rule_id': e.rule_id,
+                'severity': e.severity,
+                'message': e.message,
+                'value': str(e.value) if e.value is not None else None,
+                'suggestion': e.suggestion
+            }
+            for e in errors
+        ]
+    }
+
+    return enriched_df, results
+
+
+# =============================================================================
+# Example Usage
+# =============================================================================
+
+if __name__ == "__main__":
+    # Test GWR lookup
+    client = GWRClient()
+
+    # Test with a real EGID (Bundeshaus in Bern)
+    test_egid = "1231641"
+    print(f"Looking up EGID {test_egid}...")
+
+    result = client.lookup_egid(test_egid)
+
+    if result:
+        print(f"  Found: {result.strname} {result.deinr}, {result.dplz4} {result.ggdename}")
+        print(f"  Canton: {result.gdekt}")
+        print(f"  Coordinates (LV95): E={result.gkode}, N={result.gkodn}")
+        print(f"  Coordinates (WGS84): Lat={result.wgs84_lat}, Lon={result.wgs84_lon}")
+    else:
+        print("  Not found")

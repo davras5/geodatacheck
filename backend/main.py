@@ -188,7 +188,7 @@ async def get_workflows():
                 "category": w.get("category", ""),
                 "icon": w.get("icon", ""),
                 "input_formats": w.get("input", {}).get("formats", []),
-                "required_columns": w.get("columns", {}).get("required", []),
+                "required_columns": [inp.get("name", inp.get("id")) for inp in w.get("inputs", []) if inp.get("required", False)],
             }
             for w in WORKFLOWS
         ]
@@ -247,7 +247,12 @@ async def workflow_upload(workflow_id: str, file: UploadFile = File(...)):
     try:
         # Read file into memory
         contents = await file.read()
-        df = pd.read_excel(io.BytesIO(contents))
+
+        # Read based on file extension
+        if file_ext == '.csv':
+            df = pd.read_csv(io.BytesIO(contents))
+        else:
+            df = pd.read_excel(io.BytesIO(contents))
 
         if len(df) == 0:
             raise HTTPException(status_code=400, detail="File is empty")
@@ -332,7 +337,35 @@ async def workflow_validate(workflow_id: str, session_id: str, config: Validatio
         'options': config.options,
     }
 
-    # Run validation
+    # Check if this is the GWR enricher workflow
+    if workflow_id == 'egid-gwr-checker':
+        # Use the GWR workflow enricher
+        try:
+            import sys
+            from pathlib import Path
+            # Add workflows directory to path
+            workflows_dir = Path(__file__).parent.parent / "workflows" / "address-validation"
+            if str(workflows_dir) not in sys.path:
+                sys.path.insert(0, str(workflows_dir))
+
+            from workflow import run_gwr_check
+
+            # Run GWR enrichment with auto-detection
+            enriched_df, gwr_results = run_gwr_check(df, config.columns or None)
+
+            # Store enriched dataframe in session
+            session['enriched_df'] = enriched_df
+            session['result'] = gwr_results
+            session['config'] = validation_config
+
+            return gwr_results
+
+        except ImportError as e:
+            raise HTTPException(status_code=500, detail=f"GWR workflow module not available: {e}")
+        except Exception as e:
+            raise HTTPException(status_code=500, detail=f"GWR validation failed: {e}")
+
+    # Default: Run standard validation
     result = engine.validate(df, validation_config, rule_ids)
 
     # Add dimensional analysis
@@ -345,6 +378,7 @@ async def workflow_validate(workflow_id: str, session_id: str, config: Validatio
 
     # Store result in session
     session['result'] = result
+    session['enriched_df'] = df  # No enrichment for standard validation
     session['config'] = validation_config
 
     return result_dict
@@ -354,6 +388,13 @@ async def workflow_validate(workflow_id: str, session_id: str, config: Validatio
 async def workflow_download_report(workflow_id: str, session_id: str):
     """
     Download validation report for a workflow session.
+
+    Creates an Excel file with multiple tabs:
+    - Rules: Description of validation rules used
+    - Meta: Input/output column definitions
+    - Input: Original uploaded data
+    - Output: Enrichment result columns (bbl_id + gwr_* + eval_*)
+    - Warnings: All errors and warnings
     """
     cleanup_expired_sessions()
 
@@ -375,40 +416,138 @@ async def workflow_download_report(workflow_id: str, session_id: str):
     if result is None:
         raise HTTPException(status_code=400, detail="No validation results. Run validation first.")
 
+    original_df = session.get('df')
+    enriched_df = session.get('enriched_df', original_df)  # Fallback to original if no enrichment
+
     # Create Excel report
     output = io.BytesIO()
 
     with pd.ExcelWriter(output, engine='openpyxl') as writer:
-        # Summary sheet
-        summary_data = {
-            'Metrik': ['Workflow', 'Total Zeilen', 'Fehler', 'Warnungen', 'Bestanden', 'Erfolgsquote'],
-            'Wert': [
-                workflow['name'],
-                result.total_rows,
-                result.error_count,
-                result.warning_count,
-                result.passed_rows,
-                f"{round(result.passed_rows / result.total_rows * 100, 1)}%" if result.total_rows > 0 else "N/A"
-            ]
-        }
-        pd.DataFrame(summary_data).to_excel(writer, sheet_name='Zusammenfassung', index=False)
 
-        # Errors sheet
-        if result.errors:
-            error_data = [e.to_dict() for e in result.errors]
-            errors_df = pd.DataFrame(error_data)
-            errors_df = errors_df.rename(columns={
-                'row_number': 'Zeile',
-                'column': 'Spalte',
-                'rule_id': 'Regel-ID',
-                'rule_name': 'Regel',
-                'severity': 'Schweregrad',
-                'message': 'Meldung',
-                'value': 'Wert',
-                'suggestion': 'Vorschlag',
+        # ─────────────────────────────────────────────────────────────────────
+        # Tab 1: Rules - Description of validation rules used
+        # ─────────────────────────────────────────────────────────────────────
+        rules = workflow.get('rules', [])
+        if rules:
+            rules_data = []
+            for rule in rules:
+                rules_data.append({
+                    'Regel-ID': rule.get('id', ''),
+                    'Name': rule.get('name_de', rule.get('name', '')),
+                    'Beschreibung': rule.get('description_de', rule.get('description', '')),
+                    'Schweregrad': rule.get('severity', ''),
+                    'Kategorie': rule.get('category', ''),
+                    'Standard aktiv': 'Ja' if rule.get('default_enabled', True) else 'Nein'
+                })
+            pd.DataFrame(rules_data).to_excel(writer, sheet_name='Rules', index=False)
+
+        # ─────────────────────────────────────────────────────────────────────
+        # Tab 2: Meta - Input/output column definitions
+        # ─────────────────────────────────────────────────────────────────────
+        meta_data = []
+
+        # Input columns
+        for col in workflow.get('inputs', []):
+            meta_data.append({
+                'Typ': 'Input',
+                'Spalte': col.get('name', col.get('id', '')),
+                'Beschreibung': col.get('description', ''),
+                'Format': col.get('format', ''),
+                'Pflicht': 'Ja' if col.get('required', False) else 'Nein',
+                'Beispiel': col.get('example', ''),
+                'Erlaubte Werte': ', '.join(col.get('allowed_values', [])) if col.get('allowed_values') else ''
             })
-            errors_df = errors_df[['Zeile', 'Spalte', 'Regel', 'Schweregrad', 'Meldung', 'Wert', 'Vorschlag']]
-            errors_df.to_excel(writer, sheet_name='Fehler', index=False)
+
+        # Output columns
+        for col in workflow.get('outputs', []):
+            meta_data.append({
+                'Typ': 'Output',
+                'Spalte': col.get('name', col.get('id', '')),
+                'Beschreibung': col.get('description', ''),
+                'Format': col.get('format', ''),
+                'Pflicht': 'Ja' if col.get('required', False) else 'Nein',
+                'Beispiel': col.get('example', ''),
+                'Erlaubte Werte': ', '.join(col.get('allowed_values', [])) if col.get('allowed_values') else ''
+            })
+
+        if meta_data:
+            pd.DataFrame(meta_data).to_excel(writer, sheet_name='Meta', index=False)
+
+        # ─────────────────────────────────────────────────────────────────────
+        # Tab 3: Input - Original uploaded data
+        # ─────────────────────────────────────────────────────────────────────
+        if original_df is not None:
+            original_df.to_excel(writer, sheet_name='Input', index=False)
+
+        # ─────────────────────────────────────────────────────────────────────
+        # Tab 4: Output - Output columns only (enrichment results)
+        # ─────────────────────────────────────────────────────────────────────
+        output_col_ids = [col.get('id', col.get('name', '')) for col in workflow.get('outputs', [])]
+
+        # Include bbl_id for reference + all output columns
+        id_col = None
+        for possible_id in ['bbl_id', 'id', 'ID', 'Id']:
+            if enriched_df is not None and possible_id in enriched_df.columns:
+                id_col = possible_id
+                break
+
+        # Build output dataframe with ID + EGID + output columns
+        score_cols = []
+        if id_col:
+            score_cols.append(id_col)
+
+        # Also include av_egid (the lookup key) for reference
+        if enriched_df is not None:
+            for egid_col in ['av_egid', 'egid', 'EGID']:
+                if egid_col in enriched_df.columns and egid_col not in score_cols:
+                    score_cols.append(egid_col)
+                    break
+
+            for col_id in output_col_ids:
+                if col_id in enriched_df.columns:
+                    score_cols.append(col_id)
+
+            if score_cols:
+                output_df = enriched_df[score_cols].copy()
+                output_df.to_excel(writer, sheet_name='Output', index=False)
+
+        # ─────────────────────────────────────────────────────────────────────
+        # Tab 5: Warnings - All errors and warnings with details
+        # ─────────────────────────────────────────────────────────────────────
+        # Handle both object (ValidationResult) and dict (GWR workflow) formats
+        errors_list = result.get('errors', []) if isinstance(result, dict) else getattr(result, 'errors', [])
+
+        if errors_list:
+            warnings_data = []
+            for e in errors_list:
+                error_dict = e.to_dict() if hasattr(e, 'to_dict') else e
+
+                # Try to get bbl_id from the original data
+                bbl_id = ''
+                row_num = error_dict.get('row_number', error_dict.get('row_index'))
+                if row_num is not None and original_df is not None:
+                    # row_number is Excel row (1-indexed + header), convert to df index
+                    df_idx = row_num - 2 if isinstance(row_num, int) and row_num >= 2 else row_num
+                    if id_col and isinstance(df_idx, int) and 0 <= df_idx < len(original_df):
+                        try:
+                            bbl_id = original_df.iloc[df_idx][id_col]
+                        except (KeyError, IndexError):
+                            bbl_id = ''
+
+                warnings_data.append({
+                    'bbl_id': bbl_id,
+                    'Zeile': row_num,
+                    'Regel-ID': error_dict.get('rule_id', ''),
+                    'Regel': error_dict.get('rule_name', error_dict.get('rule_id', '')),
+                    'Spalte': error_dict.get('column', ''),
+                    'Wert': error_dict.get('value', ''),
+                    'Schweregrad': error_dict.get('severity', ''),
+                    'Meldung': error_dict.get('message', ''),
+                    'Vorschlag': error_dict.get('suggestion', '')
+                })
+
+            warnings_df = pd.DataFrame(warnings_data)
+            warnings_df.to_excel(writer, sheet_name='Warnings', index=False)
 
     output.seek(0)
 

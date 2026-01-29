@@ -599,162 +599,6 @@
             font-size: 0.875rem;
         }
 
-        /* Stats cards */
-        .stats-grid {
-            display: grid;
-            grid-template-columns: repeat(4, 1fr);
-            gap: 1rem;
-            margin-bottom: 1.5rem;
-        }
-
-        .stat-card {
-            background: var(--surface);
-            border-radius: 8px;
-            padding: 1.25rem;
-            text-align: center;
-            border: 1px solid var(--border);
-        }
-
-        .stat-card .value {
-            font-size: 2rem;
-            font-weight: 700;
-        }
-
-        .stat-card .label {
-            font-size: 0.875rem;
-            color: var(--text-secondary);
-        }
-
-        .stat-card.error .value { color: var(--accent); }
-        .stat-card.warning .value { color: var(--warning); }
-        .stat-card.success .value { color: var(--success); }
-
-        /* Tabs */
-        .tabs {
-            display: flex;
-            gap: 0;
-            margin-bottom: 1.5rem;
-            border-bottom: 2px solid var(--border);
-        }
-
-        .tab-btn {
-            padding: 0.75rem 1.25rem;
-            background: none;
-            border: none;
-            border-bottom: 2px solid transparent;
-            margin-bottom: -2px;
-            cursor: pointer;
-            font-size: 1rem;
-            color: var(--text-secondary);
-        }
-
-        .tab-btn.active {
-            color: var(--primary-dark);
-            border-bottom-color: var(--accent);
-            font-weight: 500;
-        }
-
-        .tab-btn:hover:not(.active) {
-            color: var(--primary-dark);
-        }
-
-        /* Dimension cards */
-        .dimension-grid {
-            display: grid;
-            grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
-            gap: 1rem;
-        }
-
-        .dimension-card {
-            background: var(--surface);
-            border: 1px solid var(--border);
-            border-radius: 8px;
-            padding: 1rem;
-        }
-
-        .dimension-card h4 {
-            font-size: 0.875rem;
-            margin-bottom: 0.5rem;
-        }
-
-        .dimension-card .count {
-            font-size: 0.875rem;
-            color: var(--text-secondary);
-        }
-
-        .dimension-card .errors {
-            display: flex;
-            gap: 0.5rem;
-            margin-top: 0.5rem;
-            font-size: 0.75rem;
-        }
-
-        .dimension-card .error-badge {
-            color: var(--error);
-        }
-
-        .dimension-card .warning-badge {
-            color: var(--warning);
-        }
-
-        .progress-bar {
-            height: 4px;
-            background: var(--border);
-            border-radius: 2px;
-            margin-top: 0.5rem;
-            overflow: hidden;
-        }
-
-        .progress-bar .fill {
-            height: 100%;
-            background: var(--success);
-            transition: width 0.3s;
-        }
-
-        /* Error table */
-        .error-table {
-            width: 100%;
-            border-collapse: collapse;
-            font-size: 0.875rem;
-        }
-
-        .error-table th, .error-table td {
-            padding: 0.75rem;
-            text-align: left;
-            border-bottom: 1px solid var(--border);
-        }
-
-        .error-table th {
-            background: var(--bg);
-            font-weight: 600;
-        }
-
-        .error-table tr:hover {
-            background: #f8f9fa;
-        }
-
-        .severity-badge {
-            padding: 0.125rem 0.5rem;
-            border-radius: 999px;
-            font-size: 0.75rem;
-            font-weight: 500;
-        }
-
-        .severity-badge.error {
-            background: var(--accent-light);
-            color: var(--accent);
-        }
-
-        .severity-badge.warning {
-            background: var(--warning-light);
-            color: var(--warning);
-        }
-
-        .severity-badge.info {
-            background: #e3f2fd;
-            color: var(--info);
-        }
-
         /* Loading */
         .loading {
             display: flex;
@@ -1059,6 +903,98 @@
             color: var(--text-secondary);
         }
 
+        /* Column Cards Layout */
+        .column-cards {
+            display: flex;
+            flex-direction: column;
+            gap: var(--space-md);
+        }
+
+        .column-card {
+            background: var(--surface-alt);
+            border: 1px solid var(--border);
+            border-radius: var(--border-radius);
+            padding: var(--space-md);
+        }
+
+        .column-card-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: var(--space-sm);
+            margin-bottom: var(--space-xs);
+        }
+
+        .column-card-name {
+            font-weight: 600;
+            font-size: var(--text-body);
+            color: var(--text);
+        }
+
+        .column-card-format {
+            font-family: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace;
+            font-size: var(--text-caption);
+            color: var(--text-muted);
+            margin-bottom: var(--space-xs);
+        }
+
+        .column-card-desc {
+            font-size: var(--text-body-sm);
+            color: var(--text-secondary);
+            line-height: 1.5;
+            margin-bottom: var(--space-sm);
+        }
+
+        .column-card-example {
+            font-size: var(--text-caption);
+            color: var(--text-muted);
+            font-style: italic;
+            margin-bottom: var(--space-sm);
+        }
+
+        .column-card .badge {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: var(--border-radius-sm);
+            font-size: var(--text-caption);
+            font-weight: 500;
+            flex-shrink: 0;
+        }
+
+        .column-card .badge-required {
+            background: var(--error-light);
+            color: var(--error);
+        }
+
+        .column-card .badge-optional {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            color: var(--text-muted);
+        }
+
+        .column-card .allowed-values {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 4px;
+        }
+
+        .column-card .allowed-value {
+            display: inline-block;
+            padding: 2px 6px;
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: var(--border-radius-sm);
+            font-family: 'JetBrains Mono', 'Fira Code', 'Consolas', monospace;
+            font-size: 11px;
+            color: var(--text-secondary);
+        }
+
+        .column-card .allowed-values-overflow {
+            color: var(--text-muted);
+            font-size: 11px;
+            padding: 2px 6px;
+        }
+
         /* Configuration section layout */
         .config-grid {
             display: grid;
@@ -1128,6 +1064,76 @@
             background: var(--border);
             color: var(--text-muted);
             cursor: not-allowed;
+        }
+
+        /* Results section */
+        .results-section {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: var(--border-radius-lg);
+            padding: var(--space-xl);
+            margin-bottom: var(--space-lg);
+        }
+
+        .results-header {
+            margin-bottom: var(--space-xl);
+        }
+
+        .results-header h2 {
+            font-size: var(--text-h3);
+            font-weight: 600;
+            margin-bottom: var(--space-lg);
+            color: var(--text);
+        }
+
+        .results-stats {
+            display: flex;
+            gap: var(--space-xl);
+            flex-wrap: wrap;
+        }
+
+        .result-stat {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            padding: var(--space-md) var(--space-xl);
+            background: var(--surface-alt);
+            border-radius: var(--border-radius);
+            min-width: 100px;
+        }
+
+        .result-stat .stat-value {
+            font-size: var(--text-h2);
+            font-weight: 700;
+            color: var(--text);
+        }
+
+        .result-stat .stat-label {
+            font-size: var(--text-body-sm);
+            color: var(--text-secondary);
+        }
+
+        .result-stat.error .stat-value {
+            color: var(--error);
+        }
+
+        .result-stat.warning .stat-value {
+            color: var(--warning);
+        }
+
+        .result-stat.success .stat-value {
+            color: var(--success);
+        }
+
+        .results-downloads {
+            display: flex;
+            gap: var(--space-md);
+            flex-wrap: wrap;
+        }
+
+        .results-downloads .btn {
+            display: inline-flex;
+            align-items: center;
         }
 
         /* Type badge in hero */
@@ -1249,13 +1255,6 @@
             margin-top: 0.25rem;
             margin-left: 1.5rem;
         }
-
-        /* Responsive */
-        @media (max-width: 768px) {
-            .stats-grid {
-                grid-template-columns: repeat(2, 1fr);
-            }
-        }
     </style>
 </head>
 <body>
@@ -1346,33 +1345,17 @@
                         <!-- Input Columns -->
                         <div class="columns-section" id="inputColumnsSection" style="display: none;">
                             <h3>Eingabe-Spalten</h3>
-                            <table class="columns-table" id="inputColumnsTable">
-                                <thead>
-                                    <tr>
-                                        <th>Name</th>
-                                        <th>Beschreibung</th>
-                                        <th>Format</th>
-                                        <th>Status</th>
-                                    </tr>
-                                </thead>
-                                <tbody></tbody>
-                            </table>
+                            <div class="column-cards" id="inputColumnCards">
+                                <!-- Filled by JS -->
+                            </div>
                         </div>
 
                         <!-- Output Columns -->
                         <div class="columns-section" id="outputColumnsSection" style="display: none;">
                             <h3>Ausgabe-Spalten</h3>
-                            <table class="columns-table" id="outputColumnsTable">
-                                <thead>
-                                    <tr>
-                                        <th>Name</th>
-                                        <th>Beschreibung</th>
-                                        <th>Format</th>
-                                        <th>Status</th>
-                                    </tr>
-                                </thead>
-                                <tbody></tbody>
-                            </table>
+                            <div class="column-cards" id="outputColumnCards">
+                                <!-- Filled by JS -->
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -1441,122 +1424,25 @@
                 <div class="loading">
                     <div class="spinner"></div>
                 </div>
-                <p style="text-align: center; color: var(--text-secondary);">Validierung läuft...</p>
-            </div>
-        </div>
-
-        <!-- View 3: Results Dashboard -->
-        <div id="resultsView" class="view">
-            <nav class="breadcrumb">
-                <a href="#workflows">Workflows</a>
-                <span class="breadcrumb-separator">›</span>
-                <span class="breadcrumb-current" id="breadcrumbResultsName">Ergebnisse</span>
-            </nav>
-
-            <div class="stats-grid">
-                <div class="stat-card">
-                    <div class="value" id="statTotal">0</div>
-                    <div class="label">Total Zeilen</div>
-                </div>
-                <div class="stat-card error">
-                    <div class="value" id="statErrors">0</div>
-                    <div class="label">Fehler</div>
-                </div>
-                <div class="stat-card warning">
-                    <div class="value" id="statWarnings">0</div>
-                    <div class="label">Warnungen</div>
-                </div>
-                <div class="stat-card success">
-                    <div class="value" id="statPassed">0</div>
-                    <div class="label">Bestanden</div>
-                </div>
+                <p style="text-align: center; color: var(--text-secondary);">Verarbeitung läuft...</p>
             </div>
 
-            <!-- Tabs -->
-            <div class="tabs">
-                <button class="tab-btn active" data-tab="overview" onclick="switchTab('overview')">Übersicht</button>
-                <button class="tab-btn" data-tab="region" onclick="switchTab('region')">Nach Region</button>
-                <button class="tab-btn" data-tab="portfolio" onclick="switchTab('portfolio')">Nach Portfolio</button>
-                <button class="tab-btn" data-tab="responsible" onclick="switchTab('responsible')">Nach Zuständig</button>
-                <button class="tab-btn" data-tab="details" onclick="switchTab('details')">Alle Fehler</button>
-            </div>
-
-            <!-- Tab: Overview -->
-            <div id="tab-overview" class="tab-content">
-                <div class="card">
-                    <h2>Fehler nach Kategorie</h2>
-                    <div class="dimension-grid" id="categoryGrid">
+            <!-- Results Section (appears after processing) -->
+            <div class="results-section" id="resultsSection" style="display: none;">
+                <div class="results-header">
+                    <h2>Ergebnisse</h2>
+                    <div class="results-summary" id="resultsSummary">
                         <!-- Filled by JS -->
                     </div>
                 </div>
-
-                <div class="card">
-                    <h2>Top Probleme</h2>
-                    <div id="topIssues">
-                        <!-- Filled by JS -->
-                    </div>
-                </div>
-            </div>
-
-            <!-- Tab: Region -->
-            <div id="tab-region" class="tab-content" style="display: none;">
-                <div class="card">
-                    <h2>Nach Region</h2>
-                    <div class="dimension-grid" id="regionGrid">
-                        <p style="color: var(--text-secondary);">Keine Region-Spalte ausgewählt</p>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Tab: Portfolio -->
-            <div id="tab-portfolio" class="tab-content" style="display: none;">
-                <div class="card">
-                    <h2>Nach Portfolio-Typ</h2>
-                    <div class="dimension-grid" id="portfolioGrid">
-                        <p style="color: var(--text-secondary);">Keine Portfolio-Spalte ausgewählt</p>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Tab: Responsible -->
-            <div id="tab-responsible" class="tab-content" style="display: none;">
-                <div class="card">
-                    <h2>Nach zuständiger Person</h2>
-                    <div class="dimension-grid" id="responsibleGrid">
-                        <p style="color: var(--text-secondary);">Keine Zuständig-Spalte ausgewählt</p>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Tab: All Errors -->
-            <div id="tab-details" class="tab-content" style="display: none;">
-                <div class="card">
-                    <h2>Alle Fehler und Warnungen</h2>
-                    <div style="overflow-x: auto;">
-                        <table class="error-table">
-                            <thead>
-                                <tr>
-                                    <th>Zeile</th>
-                                    <th>Spalte</th>
-                                    <th>Regel</th>
-                                    <th>Schweregrad</th>
-                                    <th>Meldung</th>
-                                </tr>
-                            </thead>
-                            <tbody id="errorTableBody">
-                                <!-- Filled by JS -->
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Download -->
-            <div class="card">
-                <h2>📥 Download</h2>
-                <div class="download-section">
+                <div class="results-downloads">
                     <button class="btn btn-primary" onclick="downloadReport()">
-                        Fehlerbericht herunterladen (Excel)
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" style="vertical-align: middle; margin-right: 8px;">
+                            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                            <polyline points="7 10 12 15 17 10"></polyline>
+                            <line x1="12" y1="15" x2="12" y2="3"></line>
+                        </svg>
+                        Bericht herunterladen (Excel)
                     </button>
                 </div>
             </div>
@@ -1619,8 +1505,9 @@
             selectedChecker: null,
             columns: [],
             detectedMappings: {},
-            results: null,
             sessionExpiry: null,
+            uploadedFileName: null,
+            validationResult: null,
         };
 
         // ====================================================================
@@ -1678,9 +1565,6 @@
                     initSwaggerUI();
                     activateView('api');
                     break;
-                case 'results':
-                    activateView('results');
-                    break;
                 default:
                     navigateTo('workflows');
             }
@@ -1704,11 +1588,13 @@
             if (viewName === 'gallery') {
                 state.sessionId = null;
                 state.selectedChecker = null;
-                state.results = null;
+                state.uploadedFileName = null;
+                state.validationResult = null;
                 document.getElementById('fileInput').value = '';
                 document.getElementById('fileInfo').style.display = 'none';
                 document.getElementById('actionBtn').disabled = true;
                 document.getElementById('sessionTimer').style.display = 'none';
+                document.getElementById('resultsSection').style.display = 'none';
             }
         }
 
@@ -1717,7 +1603,6 @@
             const routeMap = {
                 'gallery': 'workflows',
                 'upload': 'workflows',
-                'results': 'workflows',
                 'api': 'api'
             };
             const activeRoute = routeMap[viewName] || 'workflows';
@@ -1854,6 +1739,7 @@
                 state.sessionId = data.session_id;
                 state.columns = data.columns;
                 state.detectedMappings = data.detected_mappings;
+                state.uploadedFileName = file.name.replace(/\.[^/.]+$/, ''); // Store filename without extension
 
                 document.getElementById('rowCount').textContent = data.row_count;
 
@@ -1918,6 +1804,8 @@
                 return;
             }
 
+            // Hide results section if visible from previous run
+            document.getElementById('resultsSection').style.display = 'none';
             document.getElementById('loadingCard').style.display = 'block';
             document.getElementById('actionBtn').disabled = true;
 
@@ -1934,20 +1822,26 @@
             const workflowId = state.selectedChecker.id;
 
             try {
-                const response = await fetch(`${API_URL}/api/workflows/${workflowId}/sessions/${state.sessionId}/validate`, {
+                // Run validation
+                const validateResponse = await fetch(`${API_URL}/api/workflows/${workflowId}/sessions/${state.sessionId}/validate`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(config),
                 });
 
-                if (!response.ok) {
-                    const error = await response.json();
+                if (!validateResponse.ok) {
+                    const error = await validateResponse.json();
                     throw new Error(error.detail || 'Validation failed');
                 }
 
-                state.results = await response.json();
-                renderResults();
-                navigateTo('results');
+                // Store results
+                state.validationResult = await validateResponse.json();
+
+                // Show results section with summary
+                showResultsSection(state.validationResult);
+
+                // Re-enable button for another run
+                document.getElementById('actionBtn').disabled = false;
 
             } catch (error) {
                 console.error('Validation error:', error);
@@ -1958,112 +1852,58 @@
             }
         }
 
-        // ====================================================================
-        // Results Rendering
-        // ====================================================================
+        function showResultsSection(result) {
+            const section = document.getElementById('resultsSection');
+            const summary = document.getElementById('resultsSummary');
 
-        function renderResults() {
-            const r = state.results;
+            // Build summary text
+            const total = result.total_rows || 0;
+            const errors = result.error_count || 0;
+            const warnings = result.warning_count || 0;
+            const passed = result.passed_rows || 0;
+            const passRate = total > 0 ? Math.round((passed / total) * 100) : 100;
 
-            // Stats
-            document.getElementById('statTotal').textContent = r.total_rows;
-            document.getElementById('statErrors').textContent = r.error_count;
-            document.getElementById('statWarnings').textContent = r.warning_count;
-            document.getElementById('statPassed').textContent = r.passed_rows;
+            let statusClass = 'success';
+            let statusText = 'Alle Prüfungen bestanden';
+            if (errors > 0) {
+                statusClass = 'error';
+                statusText = `${errors} Fehler gefunden`;
+            } else if (warnings > 0) {
+                statusClass = 'warning';
+                statusText = `${warnings} Warnungen`;
+            }
 
-            // Category breakdown
-            const categoryGrid = document.getElementById('categoryGrid');
-            const categories = r.errors_by_category || {};
-            if (Object.keys(categories).length > 0) {
-                categoryGrid.innerHTML = Object.entries(categories).map(([cat, count]) => `
-                    <div class="dimension-card">
-                        <h4>${cat.charAt(0).toUpperCase() + cat.slice(1)}</h4>
-                        <div class="errors">
-                            <span class="error-badge">🔴 ${count} Fehler</span>
-                        </div>
+            summary.innerHTML = `
+                <div class="results-stats">
+                    <div class="result-stat">
+                        <span class="stat-value">${total}</span>
+                        <span class="stat-label">Zeilen</span>
                     </div>
-                `).join('');
-            } else {
-                categoryGrid.innerHTML = '<p style="color: var(--success);">✓ Keine Fehler gefunden!</p>';
-            }
-
-            // Top issues
-            const topIssues = document.getElementById('topIssues');
-            const ruleErrors = r.errors_by_rule || {};
-            const sortedRules = Object.entries(ruleErrors).sort((a, b) => b[1] - a[1]).slice(0, 5);
-            if (sortedRules.length > 0) {
-                topIssues.innerHTML = `
-                    <ol style="margin-left: 1.5rem;">
-                        ${sortedRules.map(([rule, count]) => `
-                            <li style="margin-bottom: 0.5rem;">${rule}: <strong>${count}</strong></li>
-                        `).join('')}
-                    </ol>
-                `;
-            } else {
-                topIssues.innerHTML = '<p style="color: var(--success);">✓ Keine Probleme gefunden!</p>';
-            }
-
-            // Dimension grids
-            renderDimensionGrid('regionGrid', r.by_region);
-            renderDimensionGrid('portfolioGrid', r.by_portfolio);
-            renderDimensionGrid('responsibleGrid', r.by_responsible);
-
-            // Error table
-            const errorTableBody = document.getElementById('errorTableBody');
-            errorTableBody.innerHTML = r.errors.slice(0, 100).map(err => `
-                <tr>
-                    <td>${err.row_number}</td>
-                    <td>${err.column}</td>
-                    <td>${err.rule_name}</td>
-                    <td><span class="severity-badge ${err.severity}">${err.severity}</span></td>
-                    <td>${err.message}</td>
-                </tr>
-            `).join('');
-
-            if (r.errors.length > 100) {
-                errorTableBody.innerHTML += `
-                    <tr>
-                        <td colspan="5" style="text-align: center; color: var(--text-secondary);">
-                            ... und ${r.errors.length - 100} weitere Fehler (Download für vollständige Liste)
-                        </td>
-                    </tr>
-                `;
-            }
-        }
-
-        function renderDimensionGrid(gridId, data) {
-            const grid = document.getElementById(gridId);
-            if (!data || Object.keys(data).length === 0) {
-                grid.innerHTML = '<p style="color: var(--text-secondary);">Keine Daten für diese Dimension</p>';
-                return;
-            }
-
-            grid.innerHTML = Object.entries(data).map(([name, stats]) => {
-                const passRate = stats.total > 0 ? ((stats.total - stats.errors) / stats.total * 100) : 100;
-                return `
-                    <div class="dimension-card">
-                        <h4>${name}</h4>
-                        <div class="count">${stats.total} Objekte</div>
-                        <div class="errors">
-                            <span class="error-badge">🔴 ${stats.errors}</span>
-                            <span class="warning-badge">🟡 ${stats.warnings}</span>
-                        </div>
-                        <div class="progress-bar">
-                            <div class="fill" style="width: ${passRate}%"></div>
-                        </div>
+                    <div class="result-stat ${errors > 0 ? 'error' : ''}">
+                        <span class="stat-value">${errors}</span>
+                        <span class="stat-label">Fehler</span>
                     </div>
-                `;
-            }).join('');
-        }
+                    <div class="result-stat ${warnings > 0 ? 'warning' : ''}">
+                        <span class="stat-value">${warnings}</span>
+                        <span class="stat-label">Warnungen</span>
+                    </div>
+                    <div class="result-stat success">
+                        <span class="stat-value">${passRate}%</span>
+                        <span class="stat-label">Bestanden</span>
+                    </div>
+                </div>
+            `;
 
-        // ====================================================================
-        // Download
-        // ====================================================================
+            section.style.display = 'block';
+
+            // Scroll to results
+            section.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
 
         async function downloadReport() {
-            if (!state.sessionId || !state.selectedWorkflow) return;
+            if (!state.sessionId || !state.selectedChecker) return;
 
-            const workflowId = state.selectedWorkflow.id;
+            const workflowId = state.selectedChecker.id;
             try {
                 const response = await fetch(`${API_URL}/api/workflows/${workflowId}/sessions/${state.sessionId}/report`);
                 if (!response.ok) throw new Error('Download failed');
@@ -2072,7 +1912,7 @@
                 const url = window.URL.createObjectURL(blob);
                 const a = document.createElement('a');
                 a.href = url;
-                a.download = 'validierung_fehler.xlsx';
+                a.download = `${state.uploadedFileName || 'validierung'}_report.xlsx`;
                 document.body.appendChild(a);
                 a.click();
                 window.URL.revokeObjectURL(url);
@@ -2093,6 +1933,15 @@
         }
 
         function selectWorkflowById(workflowId, pushState = true) {
+            // Reset previous session state
+            state.sessionId = null;
+            state.validationResult = null;
+            state.uploadedFileName = null;
+            document.getElementById('fileInput').value = '';
+            document.getElementById('fileInfo').style.display = 'none';
+            document.getElementById('actionBtn').disabled = true;
+            document.getElementById('resultsSection').style.display = 'none';
+
             fetch(`${API_URL}/api/workflows/${workflowId}`)
                 .then(r => r.json())
                 .then(workflow => {
@@ -2194,10 +2043,10 @@
 
         function renderColumnTable(type, columns) {
             const section = document.getElementById(`${type}ColumnsSection`);
-            const tbody = document.querySelector(`#${type}ColumnsTable tbody`);
+            const container = document.getElementById(`${type}ColumnCards`);
 
             // Clear previous content
-            tbody.innerHTML = '';
+            container.innerHTML = '';
 
             if (!columns || columns.length === 0) {
                 section.style.display = 'none';
@@ -2205,37 +2054,49 @@
             }
 
             section.style.display = 'block';
-            tbody.innerHTML = columns.map(col => {
+            container.innerHTML = columns.map(col => {
+                // Format info line
                 const formatInfo = col.format_description
-                    ? `${col.format} (${col.format_description})`
+                    ? `${col.format} · ${col.format_description}`
                     : col.format;
 
+                // Required/Optional badge
                 const badge = col.required
                     ? '<span class="badge badge-required">Pflicht</span>'
                     : '<span class="badge badge-optional">Optional</span>';
 
+                // Example value
+                const exampleHtml = col.example
+                    ? `<div class="column-card-example">z.B. ${col.example}</div>`
+                    : '';
+
+                // Allowed values list
                 let allowedValuesHtml = '';
                 if (col.allowed_values && col.allowed_values.length > 0) {
-                    const displayValues = col.allowed_values.length > 6
-                        ? [...col.allowed_values.slice(0, 6), `+${col.allowed_values.length - 6}`]
-                        : col.allowed_values;
+                    const maxDisplay = 8;
+                    const displayValues = col.allowed_values.slice(0, maxDisplay);
+                    const overflow = col.allowed_values.length > maxDisplay
+                        ? `<span class="allowed-values-overflow">+${col.allowed_values.length - maxDisplay} weitere</span>`
+                        : '';
                     allowedValuesHtml = `
                         <div class="allowed-values">
                             ${displayValues.map(v => `<span class="allowed-value">${v}</span>`).join('')}
+                            ${overflow}
                         </div>
                     `;
                 }
 
                 return `
-                    <tr>
-                        <td>
-                            <span class="column-name">${col.name}</span>
-                            ${col.example ? `<br><span class="column-format">z.B. ${col.example}</span>` : ''}
-                        </td>
-                        <td>${col.description}${allowedValuesHtml}</td>
-                        <td><span class="column-format">${formatInfo}</span></td>
-                        <td>${badge}</td>
-                    </tr>
+                    <div class="column-card">
+                        <div class="column-card-header">
+                            <span class="column-card-name">${col.name}</span>
+                            ${badge}
+                        </div>
+                        <div class="column-card-format">${formatInfo}</div>
+                        <div class="column-card-desc">${col.description}</div>
+                        ${exampleHtml}
+                        ${allowedValuesHtml}
+                    </div>
                 `;
             }).join('');
         }
@@ -2391,7 +2252,6 @@
             const routes = {
                 'gallery': 'workflows',
                 'upload': state.selectedChecker ? `workflow/${state.selectedChecker.id}` : 'workflows',
-                'results': 'results',
                 'api': 'api'
             };
             navigateTo(routes[viewName] || 'workflows');
@@ -2399,18 +2259,6 @@
 
         function showApiDocs() {
             navigateTo('api');
-        }
-
-        function switchTab(tabName) {
-            // Update tab buttons
-            document.querySelectorAll('.tab-btn').forEach(btn => {
-                btn.classList.toggle('active', btn.dataset.tab === tabName);
-            });
-
-            // Show/hide tab content
-            document.querySelectorAll('.tab-content').forEach(content => {
-                content.style.display = content.id === `tab-${tabName}` ? 'block' : 'none';
-            });
         }
 
         // ====================================================================

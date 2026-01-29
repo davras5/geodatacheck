@@ -4,145 +4,253 @@
     {
       "id": "egid-gwr-checker",
       "name": "EGID/GWR Checker",
-      "type": "checker",
-      "description": "Validiert EGID-Nummern und GWR-Daten auf Format, Vollständigkeit und Konsistenz.",
-      "description_long": "Prüft Eidgenössische Gebäudeidentifikatoren (EGID) und Gebäude- und Wohnungsregister (GWR) Daten. Validiert Format, Eindeutigkeit, und optionaler Abgleich mit dem offiziellen GWR.",
-      "category": "EGID",
+      "type": "enricher",
+      "description": "Vergleicht Adressdaten mit dem offiziellen Schweizer Gebäude- und Wohnungsregister (GWR).",
+      "description_long": "Gleicht Ihre Gebäudedaten mit dem offiziellen Gebäude- und Wohnungsregister (GWR) der Schweiz ab. Anhand der EGID werden Koordinaten und Adressdaten vom GWR abgerufen und mit Ihren Daten verglichen. Abweichungen werden bewertet und als Evaluation-Score ausgegeben.",
+      "category": "GWR",
       "input": {
         "formats": [".xlsx", ".xls", ".csv"],
-        "formats_description": "Excel oder CSV-Datei mit EGID-Spalte",
+        "formats_description": "Excel oder CSV-Datei mit Gebäudedaten",
         "max_size_mb": 50
       },
       "inputs": [
         {
-          "id": "egid",
-          "name": "EGID",
-          "description": "Eidgenössischer Gebäudeidentifikator",
-          "format": "integer",
+          "id": "bbl_id",
+          "name": "bbl_id",
+          "description": "Interne BBL-ID (Buchungskreis/Wirtschaftseinheit/Teilobjekt)",
+          "format": "string",
+          "example": "1000/2345/001",
+          "required": true
+        },
+        {
+          "id": "av_egid",
+          "name": "av_egid",
+          "description": "Eidgenössischer Gebäudeidentifikator gemäss GWR",
+          "format": "string",
           "format_description": "8-9 stellige Zahl",
           "example": "123456789",
           "required": true
         },
         {
-          "id": "ewid",
-          "name": "EWID",
-          "description": "Eidgenössischer Wohnungsidentifikator",
-          "format": "integer",
-          "format_description": "3-stellige Zahl",
-          "example": "001",
-          "required": false
-        },
-        {
-          "id": "strasse",
-          "name": "Strasse",
-          "description": "Strassenname und Hausnummer",
+          "id": "wgs84_lat",
+          "name": "wgs84_lat",
+          "description": "Breitengrad in WGS84-Koordinaten (Latitude)",
           "format": "string",
-          "example": "Bundesplatz 3",
+          "format_description": "Dezimalgrad",
+          "example": "46.9480",
           "required": false
         },
         {
-          "id": "plz",
-          "name": "PLZ",
-          "description": "Postleitzahl",
-          "format": "integer",
-          "format_description": "4-stellige Schweizer PLZ",
-          "example": "3003",
+          "id": "wgs84_lon",
+          "name": "wgs84_lon",
+          "description": "Längengrad in WGS84-Koordinaten (Longitude)",
+          "format": "string",
+          "format_description": "Dezimalgrad",
+          "example": "7.4474",
           "required": false
         },
         {
-          "id": "ort",
-          "name": "Ort",
+          "id": "adr_reg",
+          "name": "adr_reg",
+          "description": "Region (international) oder Kanton (Schweiz)",
+          "format": "string",
+          "format_description": "2-Buchstaben Kantonskürzel für CH",
+          "allowed_values": ["ZH", "BE", "LU", "UR", "SZ", "OW", "NW", "GL", "ZG", "FR", "SO", "BS", "BL", "SH", "AR", "AI", "SG", "GR", "AG", "TG", "TI", "VD", "VS", "NE", "GE", "JU"],
+          "example": "BE",
+          "required": false
+        },
+        {
+          "id": "adr_ort",
+          "name": "adr_ort",
           "description": "Ortsname",
           "format": "string",
           "example": "Bern",
           "required": false
         },
         {
-          "id": "kanton",
-          "name": "Kanton",
-          "description": "Kantonskürzel",
+          "id": "adr_plz",
+          "name": "adr_plz",
+          "description": "Postleitzahl",
           "format": "string",
-          "format_description": "2-Buchstaben Kantonskürzel",
-          "allowed_values": ["ZH", "BE", "LU", "UR", "SZ", "OW", "NW", "GL", "ZG", "FR", "SO", "BS", "BL", "SH", "AR", "AI", "SG", "GR", "AG", "TG", "TI", "VD", "VS", "NE", "GE", "JU"],
-          "example": "BE",
+          "format_description": "4-stellige Schweizer PLZ",
+          "example": "3003",
+          "required": false
+        },
+        {
+          "id": "adr_str",
+          "name": "adr_str",
+          "description": "Strassenname",
+          "format": "string",
+          "example": "Bundesplatz",
+          "required": false
+        },
+        {
+          "id": "adr_hsnr",
+          "name": "adr_hsnr",
+          "description": "Hausnummer",
+          "format": "string",
+          "example": "3",
           "required": false
         }
       ],
       "outputs": [
         {
-          "id": "row_number",
-          "name": "Zeile",
-          "description": "Zeilennummer im Originaldatensatz",
-          "format": "integer",
-          "required": true
-        },
-        {
-          "id": "rule_id",
-          "name": "Regel-ID",
-          "description": "Identifikator der verletzten Regel",
+          "id": "gwr_wgs84_lat",
+          "name": "gwr_wgs84_lat",
+          "description": "Breitengrad gemäss GWR (WGS84)",
           "format": "string",
-          "required": true
-        },
-        {
-          "id": "severity",
-          "name": "Schweregrad",
-          "description": "Fehlerklassifizierung",
-          "format": "string",
-          "allowed_values": ["error", "warning", "info"],
-          "required": true
-        },
-        {
-          "id": "message",
-          "name": "Meldung",
-          "description": "Beschreibung des Problems",
-          "format": "string",
-          "required": true
-        },
-        {
-          "id": "value",
-          "name": "Wert",
-          "description": "Der fehlerhafte Wert",
-          "format": "string",
+          "format_description": "Dezimalgrad",
+          "example": "46.9480",
           "required": false
         },
         {
-          "id": "suggestion",
-          "name": "Vorschlag",
-          "description": "Korrekturvorschlag (falls verfügbar)",
+          "id": "gwr_wgs84_lon",
+          "name": "gwr_wgs84_lon",
+          "description": "Längengrad gemäss GWR (WGS84)",
           "format": "string",
+          "format_description": "Dezimalgrad",
+          "example": "7.4474",
           "required": false
+        },
+        {
+          "id": "gwr_gkode",
+          "name": "gwr_gkode",
+          "description": "Ost-Koordinate gemäss GWR (LV95)",
+          "format": "string",
+          "format_description": "LV95 E-Koordinate",
+          "example": "2600000",
+          "required": false
+        },
+        {
+          "id": "gwr_gkodn",
+          "name": "gwr_gkodn",
+          "description": "Nord-Koordinate gemäss GWR (LV95)",
+          "format": "string",
+          "format_description": "LV95 N-Koordinate",
+          "example": "1200000",
+          "required": false
+        },
+        {
+          "id": "gwr_adr_reg",
+          "name": "gwr_adr_reg",
+          "description": "Kanton gemäss GWR",
+          "format": "string",
+          "example": "BE",
+          "required": false
+        },
+        {
+          "id": "gwr_adr_ort",
+          "name": "gwr_adr_ort",
+          "description": "Ortsname gemäss GWR",
+          "format": "string",
+          "example": "Bern",
+          "required": false
+        },
+        {
+          "id": "gwr_adr_plz",
+          "name": "gwr_adr_plz",
+          "description": "Postleitzahl gemäss GWR",
+          "format": "string",
+          "example": "3003",
+          "required": false
+        },
+        {
+          "id": "gwr_adr_str",
+          "name": "gwr_adr_str",
+          "description": "Strassenname gemäss GWR",
+          "format": "string",
+          "example": "Bundesplatz",
+          "required": false
+        },
+        {
+          "id": "gwr_adr_hsnr",
+          "name": "gwr_adr_hsnr",
+          "description": "Hausnummer gemäss GWR",
+          "format": "string",
+          "example": "3",
+          "required": false
+        },
+        {
+          "id": "eval_score",
+          "name": "eval_score",
+          "description": "Übereinstimmungs-Score (0-100)",
+          "format": "number",
+          "format_description": "Prozent der übereinstimmenden Felder",
+          "example": "85",
+          "required": true
+        },
+        {
+          "id": "eval_label",
+          "name": "eval_label",
+          "description": "Bewertungskategorie basierend auf Score",
+          "format": "string",
+          "allowed_values": ["Match", "Partial", "Mismatch", "Not Found"],
+          "example": "Match",
+          "required": true
         }
       ],
       "rules": [
         {
-          "id": "R-EGID-01",
-          "name_de": "EGID Format",
-          "description_de": "EGID muss eine gültige 8-9 stellige Zahl sein",
+          "id": "R-GWR-01",
+          "name_de": "EGID Pflichtfeld",
+          "description_de": "av_egid darf nicht leer, 0 oder NULL sein",
           "severity": "error",
           "default_enabled": true,
-          "category": "format"
+          "category": "completeness"
         },
         {
-          "id": "R-EGID-02",
+          "id": "R-GWR-02",
           "name_de": "EGID Eindeutigkeit",
-          "description_de": "Keine doppelten EGID-Nummern im Datensatz",
-          "severity": "error",
+          "description_de": "av_egid muss im Datensatz eindeutig sein",
+          "severity": "warning",
           "default_enabled": true,
           "category": "consistency"
         },
         {
-          "id": "R-EGID-03",
-          "name_de": "EGID Pflichtfeld",
-          "description_de": "EGID darf nicht leer sein",
+          "id": "R-GWR-03",
+          "name_de": "Koordinaten fehlen",
+          "description_de": "wgs84_lat/wgs84_lon fehlt (wird vom GWR ergänzt)",
+          "severity": "info",
+          "default_enabled": false,
+          "category": "completeness"
+        },
+        {
+          "id": "R-GWR-04",
+          "name_de": "Adresse unvollständig",
+          "description_de": "Adressfelder fehlen (werden vom GWR ergänzt)",
+          "severity": "info",
+          "default_enabled": false,
+          "category": "completeness"
+        },
+        {
+          "id": "R-GWR-05",
+          "name_de": "GWR Adressabgleich",
+          "description_de": "Adresskomponenten müssen mit GWR-Daten übereinstimmen",
+          "severity": "warning",
+          "default_enabled": true,
+          "category": "matching"
+        },
+        {
+          "id": "R-GWR-06",
+          "name_de": "GWR Koordinatenabgleich",
+          "description_de": "Koordinaten weichen vom GWR ab (Toleranz: 50m)",
+          "severity": "warning",
+          "default_enabled": true,
+          "category": "matching"
+        },
+        {
+          "id": "R-GWR-07",
+          "name_de": "EGID nicht gefunden",
+          "description_de": "EGID existiert nicht im GWR",
           "severity": "error",
           "default_enabled": true,
-          "category": "completeness"
+          "category": "matching"
         }
       ],
       "rule_categories": [
-        {"id": "format", "name_de": "Format"},
+        {"id": "completeness", "name_de": "Vollständigkeit"},
         {"id": "consistency", "name_de": "Konsistenz"},
-        {"id": "completeness", "name_de": "Vollständigkeit"}
+        {"id": "matching", "name_de": "GWR-Abgleich"}
       ]
     },
     {

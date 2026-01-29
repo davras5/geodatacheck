@@ -14,3 +14,7 @@ pydantic>=2.0.0
 # CORS middleware (included in fastapi)
 # python-multipart for file uploads
 python-multipart>=0.0.6
+
+# HTTP clients for GWR API
+requests>=2.31.0  # Sync HTTP client
+aiohttp>=3.9.0    # Async HTTP client (for faster batch lookups)
