@@ -211,7 +211,7 @@
           "name_de": "Koordinaten fehlen",
           "description_de": "wgs84_lat/wgs84_lon fehlt (wird vom GWR ergänzt)",
           "severity": "info",
-          "default_enabled": false,
+          "default_enabled": true,
           "category": "completeness"
         },
         {
@@ -219,7 +219,7 @@
           "name_de": "Adresse unvollständig",
           "description_de": "Adressfelder fehlen (werden vom GWR ergänzt)",
           "severity": "info",
-          "default_enabled": false,
+          "default_enabled": true,
           "category": "completeness"
         },
         {

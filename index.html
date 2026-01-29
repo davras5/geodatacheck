@@ -3,7 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>DRES Workflows - BBL</title>
+    <title>Workflows - BBL</title>
+    <link rel="icon" type="image/svg+xml" href="assets/swiss-logo-flag.svg">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Noto+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
@@ -1284,7 +1285,7 @@
                 <div class="header-title">
                     <strong>Bundesamt für Bauten und Logistik</strong><br>
                     Abteilung Digital Real Estate und Support<br>
-                    DRES Workflows
+                    Workflows
                 </div>
             </a>
             <div class="session-timer" id="sessionTimer" style="display: none;">
@@ -1329,7 +1330,7 @@
             </div>
 
             <!-- DOCUMENTATION: Workflow info, Inputs & Outputs -->
-            <div class="accordion" id="documentationAccordion">
+            <div class="accordion collapsed" id="documentationAccordion">
                 <div class="accordion-header" onclick="toggleAccordion('documentationAccordion')">
                     <h2>Dokumentation</h2>
                     <div class="accordion-toggle"></div>
@@ -1535,9 +1536,19 @@
         // ====================================================================
 
         function setupRouter() {
-            // Handle browser back/forward and hash link clicks
+            // Handle browser back/forward
             window.addEventListener('hashchange', handleRoute);
             window.addEventListener('popstate', handleRoute);
+
+            // Add click handlers to nav links (fixes issue where clicking same link twice does nothing)
+            document.querySelectorAll('a.nav-link[data-route]').forEach(link => {
+                link.addEventListener('click', (e) => {
+                    e.preventDefault();
+                    const route = link.getAttribute('data-route');
+                    navigateTo(route);
+                });
+            });
+
             // Handle initial URL
             handleRoute();
         }

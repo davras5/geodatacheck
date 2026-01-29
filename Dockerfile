@@ -17,6 +17,9 @@ COPY workflows/ ./workflows/
 # Copy frontend (single HTML file)
 COPY index.html .
 
+# Copy assets (logos, icons)
+COPY assets/ ./assets/
+
 # Set working directory to backend for running the app
 WORKDIR /app/backend
 
