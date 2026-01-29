@@ -571,6 +571,19 @@ async def workflow_download_report(workflow_id: str, session_id: str):
         # Get detected column mappings for finding actual column names
         detected_columns = session.get('detected_gwr_columns', {})
 
+        # Find the actual bbl_id column name (needed for Warnings tab)
+        id_col = None
+        if detected_columns.get('bbl_id') and original_df is not None:
+            if detected_columns['bbl_id'] in original_df.columns:
+                id_col = detected_columns['bbl_id']
+
+        # Fallback to common names if not detected
+        if not id_col and original_df is not None:
+            for possible_id in ['bbl_id', 'id', 'ID', 'Id', 'BBL_ID', 'object_id', 'objekt_id']:
+                if possible_id in original_df.columns:
+                    id_col = possible_id
+                    break
+
         if enriched_df is not None:
             # Build output dataframe with all defined columns in order
             output_data = {}

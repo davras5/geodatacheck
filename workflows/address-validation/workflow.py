@@ -171,10 +171,10 @@ class GWRClient:
                 gkodn=gkodn,
                 wgs84_lat=wgs84_lat,
                 wgs84_lon=wgs84_lon,
-                gdekt=attrs.get("gdekt"),      # Canton code
-                ggdename=attrs.get("ggdename"),  # Municipality
+                gdekt=_extract_string(attrs.get("gdekt")),      # Canton code (may be list)
+                ggdename=_extract_string(attrs.get("ggdename")),  # Municipality (may be list)
                 dplz4=str(attrs.get("dplz4")) if attrs.get("dplz4") else None,
-                strname=_extract_string(attrs.get("strname")),  # May be a list
+                strname=_extract_string(attrs.get("strname")),  # Street (may be list)
                 deinr=str(attrs.get("deinr")) if attrs.get("deinr") else None,
                 raw_data=attrs
             )
@@ -252,10 +252,10 @@ class GWRClient:
                     gkodn=gkodn,
                     wgs84_lat=wgs84_lat,
                     wgs84_lon=wgs84_lon,
-                    gdekt=attrs.get("gdekt"),
-                    ggdename=attrs.get("ggdename"),
+                    gdekt=_extract_string(attrs.get("gdekt")),      # Canton (may be list)
+                    ggdename=_extract_string(attrs.get("ggdename")),  # Municipality (may be list)
                     dplz4=str(attrs.get("dplz4")) if attrs.get("dplz4") else None,
-                    strname=_extract_string(attrs.get("strname")),  # May be a list
+                    strname=_extract_string(attrs.get("strname")),  # Street (may be list)
                     deinr=str(attrs.get("deinr")) if attrs.get("deinr") else None,
                     raw_data=attrs
                 )
